@@ -61,7 +61,7 @@ export default function Shell({
                     <button key={i} onClick={() => openDetail(res.catId, res.row.id)}
                       className={`w-full px-4 py-2.5 hover:bg-green-50 border-b border-[#2f3b2f]/5 flex items-center justify-between gap-2 ${lang === "ar" ? "text-right" : "text-left"}`}>
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold truncate">{res.row.values.desc || res.row.values.ref || "—"}</div>
+                        <div className="text-sm font-semibold truncate">{res.row.values.desc || res.row.values.ref || ""}</div>
                         <div className="text-xs text-[#5c6b57] flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <Tag size={10} /> {res.catName} · {res.row.values.qty ?? 0}
                           <TypeBadge type={res.material} lang={lang} />

@@ -270,7 +270,7 @@ const MATERIAL_TYPES = [
 ];
 
 const DEFAULT_COLUMNS = () => [
-  { key: "desc", label: { en: "Description", ar: "الوصف" }, type: "text" },
+  { key: "desc", label: { en: "Width", ar: "العرض" }, type: "text" },
   { key: "ref", label: { en: "Reference Code", ar: "الكود" }, type: "text" },
   { key: "qty", label: { en: "Quantity", ar: "الكمية" }, type: "number" },
   { key: "notes", label: { en: "Notes", ar: "ملاحظات" }, type: "text" },
@@ -289,55 +289,62 @@ function mkCat(nameEn, nameAr, lowStockAt, rowsRaw, defaultMaterial) {
 }
 
 const seedCategories = () => [
-  mkCat("Paper — Sheet 1", "ورق ١", 10, [
-    ["20+20+20+20", "1800/33", 80, ""],
-    ["22+47+48+100", "1800/33", 217, ""],
-    ["24+24+16+24+24+24", "1800/30", 136, ""],
-    ["23+1+6+15+23+2", "1800/28", 70, "code partly illegible"],
-    ["6+6+6+6+7+1+1+24+2+3", "1800/26", 62, ""],
-    ["as written", "-", 79, "digits unclear — verify"],
-    ["as written", "1800/27", 1, ""],
-    ["1+8+6+7+1", "1800/21", 23, ""],
+  mkCat("Paper", "ورق", 10, [
+    ["", "1800/33", 80, ""],
+    ["", "1800/33", 217, ""],
+    ["", "1800/30", 136, ""],
+    ["", "1800/28", 70, "code partly illegible"],
+    ["", "1800/26", 62, ""],
+    ["", "-", 79, "digits unclear — verify"],
+    ["", "1800/27", 1, ""],
+    ["", "1800/21", 23, ""],
   ], "mat_paper"),
   mkCat("Clear Plastic", "بلاستيك شفاف", 5, [
-    ["as written", "1000/33", 5, ""],
-    ["as written", "880/33", 3, ""],
-    ["as written", "1000/32", 4, ""],
-    ["as written", "?/32", 4, "code hard to read"],
-    ["as written", "?/32", 5, "code hard to read"],
+    ["", "1000/33", 5, ""],
+    ["", "880/33", 3, ""],
+    ["", "1000/32", 4, ""],
+    ["", "?/32", 4, "code hard to read"],
+    ["", "?/32", 5, "code hard to read"],
   ], "mat_transparent"),
-  mkCat("Plastic — Sheet 1", "بلاستيك ١", 5, [
-    ["9+6+6+6+5+14+14+18+12", "1000/33", 90, ""],
-    ["18+6+6+9", "990/33", 39, "boxed 120 on page"],
-    ["4+2", "970/33", 6, ""],
-    ["as written", "950/33", 6, "digits unclear"],
-    ["as written", "940/33", 6, "digits unclear"],
-    ["as written", "2000/33", 3, ""],
-    ["شفاف (clear)", "1500/33", 1, ""],
-    ["ورق (paper)", "1500/33", 1, ""],
-    ["as written", "1000/32", 4, ""],
-    ["6+3+2", "950/32", 11, ""],
-    ["as written", "2000/30", 7, ""],
-    ["as written", "2050/28", 3, ""],
-    ["as written", "2000/28", 1, ""],
-    ["as written", "1000/27", 2, ""],
-    ["24+2+1", "1000/26", 27, ""],
-    ["بلاستيك ابيض (white)", "1800/16", 2, ""],
-    ["بلاستيك شفاف (clear)", "1800/16", 3, ""],
+  mkCat("Plastic", "بلاستيك", 5, [
+    ["", "1000/33", 90, ""],
+    ["", "990/33", 39, "boxed 120 on page"],
+    ["", "970/33", 6, ""],
+    ["", "950/33", 6, "digits unclear"],
+    ["", "940/33", 6, "digits unclear"],
+    ["", "2000/33", 3, ""],
+    ["", "1500/33", 1, ""],
+    ["", "1500/33", 1, ""],
+    ["", "1000/32", 4, ""],
+    ["", "950/32", 11, ""],
+    ["", "2000/30", 7, ""],
+    ["", "2050/28", 3, ""],
+    ["", "2000/28", 1, ""],
+    ["", "1000/27", 2, ""],
+    ["", "1000/26", 27, ""],
+    ["", "1800/16", 2, ""],
+    ["", "1800/16", 3, ""],
   ], "mat_plastic"),
   mkCat("FSC Coated Paper", "ورق FSC", 5, [
-    ["142+1+3", "110x1000", 146, ""],
-    ["as written", "110x950", 6, ""],
-    ["as written", "110x800", 1, ""],
-    ["as written", "1000/21", 3, "from separate note page"],
+    ["", "110x1000", 146, ""],
+    ["", "110x950", 6, ""],
+    ["", "110x800", 1, ""],
+    ["", "1000/21", 3, "from separate note page"],
   ], "mat_paper"),
+  mkCat("Silver", "فضي", 5, [
+    ["", "", 0, ""],
+    ["", "", 0, ""],
+    ["", "", 0, ""],
+    ["", "", 0, ""],
+    ["", "", 0, ""],
+  ], "mat_silver"),
 ];
 
 function cat() { return "c_" + Math.random().toString(36).slice(2, 10); }
 function rid() { return "r_" + Math.random().toString(36).slice(2, 10); }
 function row(values) { return { id: rid(), values }; }
 
-const STORAGE_KEY = "stock-ledger-v5";
+const STORAGE_KEY = "stock-ledger-v7";
 const STORAGE_KEY_LANG = "stock-ledger-lang";
 const MAX_HISTORY = 30;
 const MAX_LOG = 200;
@@ -656,7 +663,7 @@ export default function InventoryApp() {
                   {pagedLowStock.map((it, i) => (
                     <tr key={i} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
                       <td className="px-4 py-2"><button onClick={() => openDetail(it.catId, it.rowId)} className="text-[#8a5a2e] hover:underline">{it.cat}</button></td>
-                      <td className="px-4 py-2">{it.desc || "—"}</td>
+                      <td className="px-4 py-2">{it.desc || it.ref || ""}</td>
                       <td className="px-4 py-2"><TypeBadge type={it.material} lang={lang} /></td>
                       <td className="px-4 py-2"><LocationBadge loc={it.location} lang={lang} /></td>
                       <td className="px-4 py-2 font-bold text-[#b23b3b]">{it.qty} / {it.thresh}</td>
@@ -696,7 +703,7 @@ export default function InventoryApp() {
               <tbody>
                 {checkoutLog.slice(0, 8).map((entry) => (
                   <tr key={entry.id} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
-                    <td className="px-4 py-2"><button onClick={() => openDetail(entry.catId, entry.rowId)} className="text-[#8a5a2e] hover:underline">{entry.desc || entry.ref || "—"}</button></td>
+                    <td className="px-4 py-2"><button onClick={() => openDetail(entry.catId, entry.rowId)} className="text-[#8a5a2e] hover:underline">{entry.desc || entry.ref || ""}</button></td>
                     <td className="px-4 py-2 text-[#5c6b57]">{entry.catName}</td>
                     <td className="px-4 py-2 font-bold text-[#b23b3b]">−{entry.qtyTaken}</td>
                     <td className="px-4 py-2">{entry.remainingQty}</td>
@@ -1082,7 +1089,7 @@ function ModalHost({ modal, setModal, t, lang, categories, locations, setLocatio
       <Wrap title={t.itemDetails} wide>
         <div className="mb-4">
           <div className="text-xs text-[#5c6b57] mb-1 flex items-center gap-1"><Tag size={11} /> {nameOf(c.name, lang)}</div>
-          <div className="text-lg font-bold">{r.values.desc || r.values.ref || "—"}</div>
+          <div className="text-lg font-bold">{r.values.desc || r.values.ref || ""}</div>
           {r.values.ref && <div className="text-xs text-[#5c6b57]">{lang === "ar" ? "الكود" : "Ref"}: {r.values.ref}</div>}
         </div>
 
@@ -1271,7 +1278,7 @@ function Shell({
                     <button key={i} onClick={() => openDetail(res.catId, res.row.id)}
                       className={`w-full px-4 py-2.5 hover:bg-green-50 border-b border-[#2f3b2f]/5 flex items-center justify-between gap-2 ${lang === "ar" ? "text-right" : "text-left"}`}>
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold truncate">{res.row.values.desc || res.row.values.ref || "—"}</div>
+                        <div className="text-sm font-semibold truncate">{res.row.values.desc || res.row.values.ref || ""}</div>
                         <div className="text-xs text-[#5c6b57] flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <Tag size={10} /> {res.catName} · {res.row.values.qty ?? 0}
                           <TypeBadge type={res.material} lang={lang} />

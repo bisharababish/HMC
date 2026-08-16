@@ -15,13 +15,13 @@ export const MATERIAL_TYPES = [
 ];
 
 export const DEFAULT_COLUMNS = () => [
-  { key: "desc", label: { en: "Description", ar: "الوصف" }, type: "text" },
+  { key: "desc", label: { en: "Width", ar: "العرض" }, type: "text" },
   { key: "ref", label: { en: "Reference Code", ar: "الكود" }, type: "text" },
   { key: "qty", label: { en: "Quantity", ar: "الكمية" }, type: "number" },
   { key: "notes", label: { en: "Notes", ar: "ملاحظات" }, type: "text" },
 ];
 
-export const STORAGE_KEY = "stock-ledger-v5";
+export const STORAGE_KEY = "stock-ledger-v7";
 export const STORAGE_KEY_LANG = "stock-ledger-lang";
 export const MAX_HISTORY = 30;
 export const MAX_LOG = 200;

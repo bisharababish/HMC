@@ -151,7 +151,7 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
       <Wrap title={t.itemDetails} wide>
         <div className="mb-4">
           <div className="text-xs text-[#5c6b57] mb-1 flex items-center gap-1"><Tag size={11} /> {nameOf(c.name, lang)}</div>
-          <div className="text-lg font-bold">{r.values.desc || r.values.ref || "—"}</div>
+          <div className="text-lg font-bold">{r.values.desc || r.values.ref || ""}</div>
           {r.values.ref && <div className="text-xs text-[#5c6b57]">{lang === "ar" ? "الكود" : "Ref"}: {r.values.ref}</div>}
         </div>
 

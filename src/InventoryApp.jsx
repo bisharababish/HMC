@@ -292,7 +292,7 @@ export default function InventoryApp() {
                   {pagedLowStock.map((it, i) => (
                     <tr key={i} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
                       <td className="px-4 py-2"><button onClick={() => openDetail(it.catId, it.rowId)} className="text-[#8a5a2e] hover:underline">{it.cat}</button></td>
-                      <td className="px-4 py-2">{it.desc || "â€”"}</td>
+                      <td className="px-4 py-2">{it.desc || it.ref || ""}</td>
                       <td className="px-4 py-2"><TypeBadge type={it.material} lang={lang} /></td>
                       <td className="px-4 py-2"><LocationBadge loc={it.location} lang={lang} /></td>
                       <td className="px-4 py-2 font-bold text-[#b23b3b]">{it.qty} / {it.thresh}</td>
@@ -332,7 +332,7 @@ export default function InventoryApp() {
               <tbody>
                 {checkoutLog.slice(0, 8).map((entry) => (
                   <tr key={entry.id} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
-                    <td className="px-4 py-2"><button onClick={() => openDetail(entry.catId, entry.rowId)} className="text-[#8a5a2e] hover:underline">{entry.desc || entry.ref || "â€”"}</button></td>
+                    <td className="px-4 py-2"><button onClick={() => openDetail(entry.catId, entry.rowId)} className="text-[#8a5a2e] hover:underline">{entry.desc || entry.ref || ""}</button></td>
                     <td className="px-4 py-2 text-[#5c6b57]">{entry.catName}</td>
                     <td className="px-4 py-2 font-bold text-[#b23b3b]">âˆ’{entry.qtyTaken}</td>
                     <td className="px-4 py-2">{entry.remainingQty}</td>
