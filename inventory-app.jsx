@@ -11,8 +11,8 @@ import {
 // ===========================================================================
 const STR = {
   en: {
-    appTitle: "Stock Ledger",
-    appSubtitle: "Your warehouse inventory database",
+    appTitle: "HMC LABELING STORAGE",
+    appSubtitle: "",
     searchPlaceholder: "Search item, code, e.g. \"26\"...",
     noMatches: "No matches",
     dashboardTab: "Dashboard",
@@ -125,8 +125,8 @@ const STR = {
     daysAgo: "d ago",
   },
   ar: {
-    appTitle: "دفتر المخزون",
-    appSubtitle: "قاعدة بيانات المخزون الخاصة بمحلكم",
+    appTitle: "HMC LABELING STORAGE",
+    appSubtitle: "",
     searchPlaceholder: "ابحث عن صنف أو كود، مثلاً \"26\"...",
     noMatches: "لا توجد نتائج",
     dashboardTab: "لوحة المتابعة",
@@ -271,7 +271,7 @@ const MATERIAL_TYPES = [
 
 const DEFAULT_COLUMNS = () => [
   { key: "desc", label: { en: "Width", ar: "العرض" }, type: "text" },
-  { key: "ref", label: { en: "Reference Code", ar: "الكود" }, type: "text" },
+  { key: "ref", label: { en: "Meters", ar: "متر" }, type: "text" },
   { key: "qty", label: { en: "Quantity", ar: "الكمية" }, type: "number" },
   { key: "notes", label: { en: "Notes", ar: "ملاحظات" }, type: "text" },
 ];
@@ -299,14 +299,14 @@ const seedCategories = () => [
     ["", "1800/27", 1, ""],
     ["", "1800/21", 23, ""],
   ], "mat_paper"),
-  mkCat("Clear Plastic", "بلاستيك شفاف", 5, [
+  mkCat("Plastic", "بلاستيك", 5, [
     ["", "1000/33", 5, ""],
     ["", "880/33", 3, ""],
     ["", "1000/32", 4, ""],
     ["", "?/32", 4, "code hard to read"],
     ["", "?/32", 5, "code hard to read"],
   ], "mat_transparent"),
-  mkCat("Plastic", "بلاستيك", 5, [
+  mkCat("Clear Plastic", "بلاستيك شفاف", 5, [
     ["", "1000/33", 90, ""],
     ["", "990/33", 39, "boxed 120 on page"],
     ["", "970/33", 6, ""],
@@ -344,10 +344,22 @@ function cat() { return "c_" + Math.random().toString(36).slice(2, 10); }
 function rid() { return "r_" + Math.random().toString(36).slice(2, 10); }
 function row(values) { return { id: rid(), values }; }
 
-const STORAGE_KEY = "stock-ledger-v7";
+const STORAGE_KEY = "stock-ledger-v9";
 const STORAGE_KEY_LANG = "stock-ledger-lang";
 const MAX_HISTORY = 30;
 const MAX_LOG = 200;
+
+function swapPlasticSheetNames(categories) {
+  const clear = categories.find((c) => c.name?.en === "Clear Plastic");
+  if (!clear) return categories;
+  const transparentCount = clear.rows.filter((r) => r.values.type === "mat_transparent").length;
+  if (transparentCount <= clear.rows.length / 2) return categories;
+  return categories.map((c) => {
+    if (c.name?.en === "Clear Plastic") return { ...c, name: { en: "Plastic", ar: "بلاستيك" } };
+    if (c.name?.en === "Plastic") return { ...c, name: { en: "Clear Plastic", ar: "بلاستيك شفاف" } };
+    return c;
+  });
+}
 
 function toCSV(category, locations, lang) {
   const cols = [
@@ -419,7 +431,7 @@ export default function InventoryApp() {
         const res = await window.storage.get(STORAGE_KEY, false);
         if (res && res.value) {
           const parsed = JSON.parse(res.value);
-          setCategories(parsed.categories || parsed);
+          setCategories(swapPlasticSheetNames(parsed.categories || parsed));
           setLocations(parsed.locations || DEFAULT_LOCATIONS);
           setCheckoutLog(parsed.checkoutLog || []);
         } else {
@@ -973,10 +985,10 @@ function ModalHost({ modal, setModal, t, lang, categories, locations, setLocatio
     </div>
   );
 
-  const Field = ({ label, value, onChange, placeholder }) => (
+  const Field = ({ label, value, onChange, placeholder, autoFocus: shouldFocus = false }) => (
     <div className="mb-3">
       <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{label}</label>
-      <input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+      <input autoFocus={shouldFocus} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         className="w-full px-3 py-2 rounded border border-[#2f3b2f]/20 bg-white text-sm outline-none focus:border-[#4a6b52]" />
     </div>
   );
@@ -994,7 +1006,7 @@ function ModalHost({ modal, setModal, t, lang, categories, locations, setLocatio
   if (modal.kind === "addColumn") {
     return (
       <Wrap title={t.addColumnTitle}>
-        <Field label={t.columnNameEn} value={f1} onChange={setF1} placeholder="e.g. Supplier" />
+        <Field label={t.columnNameEn} value={f1} onChange={setF1} placeholder="e.g. Supplier" autoFocus />
         <Field label={t.columnNameAr} value={f2} onChange={setF2} placeholder="مثال: المورد" />
         <div className="mb-2">
           <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.columnType}</label>
@@ -1020,7 +1032,7 @@ function ModalHost({ modal, setModal, t, lang, categories, locations, setLocatio
   if (modal.kind === "addLocation") {
     return (
       <Wrap title={t.addLocationTitle}>
-        <Field label={t.locationNameEn} value={f1} onChange={setF1} placeholder="e.g. Warehouse 2" />
+        <Field label={t.locationNameEn} value={f1} onChange={setF1} placeholder="e.g. Warehouse 2" autoFocus />
         <Field label={t.locationNameAr} value={f2} onChange={setF2} placeholder="مثال: المخزن ٢" />
         <Buttons confirmLabel={t.add} disabled={!f1.trim() && !f2.trim()} onConfirm={() => {
           const palette = ["#2e7d46", "#8a5a2e", "#6b4fa0", "#1f6f8b", "#b23b3b", "#a8842e", "#4a7c8c"];
@@ -1035,7 +1047,7 @@ function ModalHost({ modal, setModal, t, lang, categories, locations, setLocatio
   if (modal.kind === "addSheet") {
     return (
       <Wrap title={t.addSheetTitle}>
-        <Field label={t.sheetNameEn} value={f1} onChange={setF1} placeholder="e.g. Boxes" />
+        <Field label={t.sheetNameEn} value={f1} onChange={setF1} placeholder="e.g. Boxes" autoFocus />
         <Field label={t.sheetNameAr} value={f2} onChange={setF2} placeholder="مثال: كراتين" />
         <Buttons confirmLabel={t.add} disabled={!f1.trim() && !f2.trim()} onConfirm={() => {
           const newCat = mkCat(f1.trim() || f2.trim(), f2.trim() || f1.trim(), 5, [["", "", 0, ""]], "mat_unassigned");
@@ -1090,7 +1102,7 @@ function ModalHost({ modal, setModal, t, lang, categories, locations, setLocatio
         <div className="mb-4">
           <div className="text-xs text-[#5c6b57] mb-1 flex items-center gap-1"><Tag size={11} /> {nameOf(c.name, lang)}</div>
           <div className="text-lg font-bold">{r.values.desc || r.values.ref || ""}</div>
-          {r.values.ref && <div className="text-xs text-[#5c6b57]">{lang === "ar" ? "الكود" : "Ref"}: {r.values.ref}</div>}
+          {r.values.ref && <div className="text-xs text-[#5c6b57]">{lang === "ar" ? "متر" : "Meters"}: {r.values.ref}</div>}
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">

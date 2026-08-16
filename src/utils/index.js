@@ -59,14 +59,14 @@ export const seedCategories = () => [
     ["", "1800/27", 1, ""],
     ["", "1800/21", 23, ""],
   ], "mat_paper"),
-  mkCat("Clear Plastic", "بلاستيك شفاف", 5, [
+  mkCat("Plastic", "بلاستيك", 5, [
     ["", "1000/33", 5, ""],
     ["", "880/33", 3, ""],
     ["", "1000/32", 4, ""],
     ["", "?/32", 4, "code hard to read"],
     ["", "?/32", 5, "code hard to read"],
   ], "mat_transparent"),
-  mkCat("Plastic", "بلاستيك", 5, [
+  mkCat("Clear Plastic", "بلاستيك شفاف", 5, [
     ["", "1000/33", 90, ""],
     ["", "990/33", 39, "boxed 120 on page"],
     ["", "970/33", 6, ""],
@@ -101,3 +101,15 @@ export const seedCategories = () => [
 ];
 
 export { mkCat };
+
+export function swapPlasticSheetNames(categories) {
+  const clear = categories.find((c) => c.name?.en === "Clear Plastic");
+  if (!clear) return categories;
+  const transparentCount = clear.rows.filter((r) => r.values.type === "mat_transparent").length;
+  if (transparentCount <= clear.rows.length / 2) return categories;
+  return categories.map((c) => {
+    if (c.name?.en === "Clear Plastic") return { ...c, name: { en: "Plastic", ar: "بلاستيك" } };
+    if (c.name?.en === "Plastic") return { ...c, name: { en: "Clear Plastic", ar: "بلاستيك شفاف" } };
+    return c;
+  });
+}

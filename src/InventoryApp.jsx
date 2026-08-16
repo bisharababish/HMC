@@ -1,16 +1,18 @@
 ﻿import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Plus, Minus, Trash2, PlusCircle, Loader2,
-  Search, ArrowUpDown, X, MapPin, AlertTriangle, Eye, PackageMinus, Clock,
+  Search, ArrowUpDown, X, MapPin, AlertTriangle, Eye, PackageMinus, Clock, History, Pencil, Cloud,
 } from "lucide-react";
 import { STR, nameOf, timeAgo } from "./i18n/strings.js";
-import { DEFAULT_LOCATIONS, MATERIAL_TYPES, STORAGE_KEY, STORAGE_KEY_LANG, MAX_HISTORY, MAX_LOG } from "./constants/index.js";
-import { seedCategories, row, rid, toCSV, downloadText } from "./utils/index.js";
+import { DEFAULT_LOCATIONS, MATERIAL_TYPES, STORAGE_KEY, MAX_HISTORY, MAX_LOG, normalizeLocations } from "./constants/index.js";
+import { seedCategories, row, rid, toCSV, downloadText, swapPlasticSheetNames } from "./utils/index.js";
 import Shell from "./components/Shell.jsx";
 import ModalHost from "./components/ModalHost.jsx";
 import Pagination from "./components/Pagination.jsx";
 import OverflowMenu from "./components/OverflowMenu.jsx";
-import { Panel, StatCard, LocationBadge, TypeBadge, LocationSelect } from "./components/ui.jsx";
+import { fetchBackupHistory, loadBackupSnapshot, wasLastSaveCloud, clearAllBackups } from "./lib/db.js";
+import { isSupabaseEnabled } from "./lib/supabase.js";
+import { Panel, StatCard, LocationBadge, TypeBadge, LocationSelect, SheetCellInput } from "./components/ui.jsx";
 export default function InventoryApp() {
   const [categories, setCategories] = useState(null);
   const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
@@ -35,6 +37,10 @@ export default function InventoryApp() {
   const [pageSize, setPageSize] = useState(5);
   const [lowStockPage, setLowStockPage] = useState(1);
   const [lowStockPageSize, setLowStockPageSize] = useState(5);
+  const [cloudSynced, setCloudSynced] = useState(true);
+  const [cloudSavedAt, setCloudSavedAt] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [backups, setBackups] = useState([]);
   const saveTimer = useRef(null);
   const history = useRef([]);
   const globalBoxRef = useRef(null);
@@ -44,41 +50,72 @@ export default function InventoryApp() {
 
   useEffect(() => {
     (async () => {
+      if (!isSupabaseEnabled()) {
+        setLoadError("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env, then restart the dev server.");
+        setCategories([]);
+        setLocations(DEFAULT_LOCATIONS);
+        setActiveCat("__dashboard__");
+        setLoaded(true);
+        return;
+      }
       try {
         const res = await window.storage.get(STORAGE_KEY, false);
         if (res && res.value) {
           const parsed = JSON.parse(res.value);
-          setCategories(parsed.categories || parsed);
-          setLocations(parsed.locations || DEFAULT_LOCATIONS);
+          const cats = parsed.categories ?? (Array.isArray(parsed) ? parsed : null);
+          if (Array.isArray(cats)) {
+            setCategories(cats.length > 0 ? swapPlasticSheetNames(cats) : []);
+          } else {
+            setCategories(seedCategories());
+          }
+          setLocations(normalizeLocations(parsed.locations));
           setCheckoutLog(parsed.checkoutLog || []);
+          if (parsed.lang === "en" || parsed.lang === "ar") setLang(parsed.lang);
+          if (res.updated_at) setCloudSavedAt(res.updated_at);
         } else {
-          setCategories(seedCategories());
+          setCategories([]);
           setLocations(DEFAULT_LOCATIONS);
         }
+        setBackups(await fetchBackupHistory());
       } catch (e) {
-        setCategories(seedCategories());
+        console.error("Load failed", e);
+        setLoadError("Could not load from Supabase. Check your connection and SQL setup.");
+        setCategories([]);
         setLocations(DEFAULT_LOCATIONS);
       }
-      try {
-        const langRes = await window.storage.get(STORAGE_KEY_LANG, false);
-        if (langRes && langRes.value) setLang(langRes.value);
-      } catch (e) {}
       setActiveCat("__dashboard__");
       setLoaded(true);
     })();
   }, []);
 
+  useEffect(() => {
+    if (loaded && locations.length === 0) setLocations(DEFAULT_LOCATIONS);
+  }, [loaded, locations.length]);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+
   const persist = useCallback((data) => {
+    if (!isSupabaseEnabled()) return;
     setSaving(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
-      try { await window.storage.set(STORAGE_KEY, JSON.stringify(data), false); } catch (e) {}
+      try {
+        const savedAt = await window.storage.set(STORAGE_KEY, JSON.stringify(data), false);
+        setCloudSynced(wasLastSaveCloud());
+        if (savedAt) setCloudSavedAt(savedAt);
+        setBackups(await fetchBackupHistory());
+      } catch (e) {
+        setCloudSynced(false);
+        showToast(lang === "ar" ? "فشل الحفظ على السحابة" : "Cloud save failed");
+      }
       setSaving(false);
     }, 450);
-  }, []);
+  }, [lang]);
 
-  useEffect(() => { if (loaded && categories) persist({ categories, locations, checkoutLog }); }, [categories, locations, checkoutLog, loaded, persist]);
-  useEffect(() => { if (loaded) window.storage.set(STORAGE_KEY_LANG, lang, false).catch(() => {}); }, [lang, loaded]);
+  useEffect(() => {
+    if (!loaded || !categories) return;
+    persist({ categories, locations: normalizeLocations(locations), checkoutLog, lang });
+  }, [categories, locations, checkoutLog, lang, loaded, persist]);
   useEffect(() => { setPage(1); }, [activeCat, query, locFilter, typeFilter, sortKey]);
 
   useEffect(() => {
@@ -86,8 +123,6 @@ export default function InventoryApp() {
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
-
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
 
   const withHistory = (updater) => {
     setCategories((prev) => {
@@ -114,10 +149,10 @@ export default function InventoryApp() {
     );
   }
 
-  const isDashboard = activeCat === "__dashboard__";
-  const current = isDashboard ? null : categories.find((c) => c.id === activeCat) || categories[0];
-  const locOf = (id) => locations.find((l) => l.id === id) || locations[locations.length - 1];
-  const typeOf = (id) => MATERIAL_TYPES.find((m) => m.id === id) || MATERIAL_TYPES[MATERIAL_TYPES.length - 1];
+  const current = categories.find((c) => c.id === activeCat);
+  const isDashboard = activeCat === "__dashboard__" || !current;
+  const locOf = (id) => locations.find((l) => l.id === id) || locations.find((l) => l.id === "loc_unassigned") || DEFAULT_LOCATIONS[DEFAULT_LOCATIONS.length - 1];
+  const typeOf = (id) => MATERIAL_TYPES.find((m) => m.id === id) || MATERIAL_TYPES.find((m) => m.id === "mat_unassigned") || MATERIAL_TYPES[MATERIAL_TYPES.length - 1];
 
   const updateCategory = (catId, updater) => withHistory((prev) => prev.map((c) => (c.id === catId ? updater(c) : c)));
 
@@ -195,6 +230,49 @@ export default function InventoryApp() {
     showToast(`${t.toastTakenOut}: ${take}`);
   };
 
+  const deleteActivityEntry = (entryId, restoreStock) => {
+    const entry = checkoutLog.find((e) => e.id === entryId);
+    if (!entry) return;
+    if (restoreStock) {
+      updateCategory(entry.catId, (c) => ({
+        ...c,
+        rows: c.rows.map((r) =>
+          r.id === entry.rowId
+            ? { ...r, values: { ...r.values, qty: (Number(r.values.qty) || 0) + entry.qtyTaken, lastUpdated: Date.now() } }
+            : r
+        ),
+      }));
+    }
+    setCheckoutLog((prev) => prev.filter((e) => e.id !== entryId));
+    showToast(t.toastActivityRemoved);
+  };
+
+  const saveActivityEdit = (entryId, newQty, newNote) => {
+    const entry = checkoutLog.find((e) => e.id === entryId);
+    if (!entry) return;
+    const oldQty = entry.qtyTaken;
+    const qty = Math.max(0, Math.floor(Number(newQty) || 0));
+    const diff = oldQty - qty;
+    if (diff !== 0) {
+      updateCategory(entry.catId, (c) => ({
+        ...c,
+        rows: c.rows.map((r) =>
+          r.id === entry.rowId
+            ? { ...r, values: { ...r.values, qty: Math.max(0, (Number(r.values.qty) || 0) + diff), lastUpdated: Date.now() } }
+            : r
+        ),
+      }));
+    }
+    setCheckoutLog((prev) =>
+      prev.map((e) =>
+        e.id === entryId
+          ? { ...e, qtyTaken: qty, remainingQty: (e.remainingQty ?? 0) + (oldQty - qty), note: newNote || "" }
+          : e
+      )
+    );
+    showToast(t.toastActivityUpdated);
+  };
+
   // ---- global search ----
   let globalResults = [];
   if (globalQuery.trim()) {
@@ -208,16 +286,43 @@ export default function InventoryApp() {
     if (globalTypeFilter !== "all") globalResults = globalResults.filter((res) => res.row.values.type === globalTypeFilter);
   }
 
+  const restoreBackup = async (id) => {
+    const data = await loadBackupSnapshot(id);
+    if (!data) return;
+    history.current.push(JSON.stringify(categories));
+    setCategories(swapPlasticSheetNames(data.categories || data));
+    setLocations(normalizeLocations(data.locations));
+    setCheckoutLog(data.checkoutLog || []);
+    if (data.lang === "en" || data.lang === "ar") setLang(data.lang);
+    showToast(t.snapshotRestored);
+  };
+
+  const clearBackupHistory = async () => {
+    try {
+      await clearAllBackups();
+      setBackups([]);
+      showToast(t.toastBackupsCleared);
+    } catch {
+      showToast(t.cloudSaveFailed);
+    }
+  };
+
+  const clearAllActivity = () => {
+    setCheckoutLog([]);
+    showToast(t.toastActivityCleared);
+  };
+
   const shellProps = {
-    t, lang, setLang, title: t.appTitle, subtitle: t.appSubtitle, saving, categories, activeCat, setActiveCat,
+    t, lang, setLang, title: t.appTitle, subtitle: t.appSubtitle, saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat,
     addCategory: () => setModal({ kind: "addSheet" }), undo, toast, dir,
     globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, jumpToResult, openDetail,
-    globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen,
+    globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, loadError,
   };
 
   const modalHostProps = {
-    modal, setModal, t, lang, categories, locations, setLocations, withHistory, setActiveCat, showToast,
+    modal, setModal, t, lang, categories, locations, checkoutLog, setLocations, withHistory, setActiveCat, showToast,
     deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult, typeOf, locOf,
+    deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity,
   };
 
   // ============================= Dashboard =============================
@@ -245,13 +350,42 @@ export default function InventoryApp() {
       return { ...loc, count, qty };
     });
 
+    const itemCount = categories.reduce((n, c) => n + c.rows.length, 0);
+
     return (
       <Shell {...shellProps}>
+        {isSupabaseEnabled() && (
+          <div className="mb-6 rounded-lg border border-[#2e7d46]/25 bg-[#f0f7f2] px-5 py-4">
+            <div className="flex items-start gap-2">
+              <Cloud size={18} className="text-[#2e7d46] shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-[#2f3b2f] text-sm">{t.cloudStorageTitle}</p>
+                <p className="text-xs text-[#5c6b57] mt-1">{t.cloudStorageBody}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs font-semibold text-[#2f3b2f]">
+                  <span>{categories.length} {t.sheets.toLowerCase()}</span>
+                  <span>{itemCount} {t.items}</span>
+                  <span>{locations.length} {lang === "ar" ? "مواقع" : "locations"}</span>
+                  <span>{checkoutLog.length} {lang === "ar" ? "سجلات نشاط" : "activity entries"}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {categories.length === 0 ? (
+          <div className="mb-6 rounded-lg border border-dashed border-[#2f3b2f]/25 bg-[#fbfaf5] p-8 text-center">
+            <p className="text-[#2f3b2f] font-semibold mb-2">{lang === "ar" ? "لا توجد أوراق بعد" : "No sheets yet"}</p>
+            <p className="text-sm text-[#5c6b57] mb-4">{lang === "ar" ? "ابدأ بإنشاء ورقة جديدة لتتبع المخزون." : "Create your first sheet to start tracking inventory."}</p>
+            <button onClick={() => setModal({ kind: "addSheet" })} className="inline-flex items-center gap-1.5 px-4 py-2 rounded font-semibold text-white" style={{ backgroundColor: "#8a5a2e" }}>
+              <PlusCircle size={16} /> {t.addSheet}
+            </button>
+          </div>
+        ) : (
         <div className="grid md:grid-cols-3 gap-4 mb-6">
           <StatCard label={t.totalUnits} value={grand} accent="#8a5a2e" />
           <StatCard label={t.sheets} value={categories.length} accent="#4a6b52" />
           <StatCard label={t.lowStock} value={lowStockItems.length} accent={lowStockItems.length ? "#b23b3b" : "#4a6b52"} />
         </div>
+        )}
 
         <Panel icon={<MapPin size={16} className="text-[#4a6b52]" />} title={t.byLocation}>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 p-4">
@@ -261,7 +395,7 @@ export default function InventoryApp() {
                   <span className="w-2.5 h-2.5 rounded-full" style={{ background: loc.color }} />
                   <span className="text-sm font-semibold">{nameOf(loc.name, lang)}</span>
                 </div>
-                <div className="text-xs text-[#5c6b57]">{loc.count} {t.items} Â· {loc.qty} {t.units}</div>
+                <div className="text-xs text-[#5c6b57]">{loc.count} {t.items} · {loc.qty} {t.units}</div>
               </div>
             ))}
             <button onClick={() => setModal({ kind: "addLocation" })} className="rounded-lg border border-dashed border-[#2f3b2f]/25 p-3 text-sm text-[#5c6b57] hover:bg-[#f4f2ec] flex items-center justify-center gap-1.5">
@@ -316,33 +450,92 @@ export default function InventoryApp() {
         </Panel>
 
         <Panel icon={<PackageMinus size={16} className="text-[#6b4fa0]" />} title={t.recentActivity}>
+          {checkoutLog.length > 0 && (
+            <div className={`px-5 pt-3 flex ${lang === "ar" ? "justify-start" : "justify-end"}`}>
+              <button
+                type="button"
+                onClick={() => setModal({ kind: "confirmClearActivity" })}
+                className="text-xs px-3 py-1.5 rounded border border-red-200 text-red-700 hover:bg-red-50 font-semibold"
+              >
+                {t.clearAllActivity}
+              </button>
+            </div>
+          )}
           {checkoutLog.length === 0 ? (
             <p className="p-5 text-sm text-[#5c6b57]">{t.noActivity}</p>
           ) : (
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="bg-[#f4f2ec] text-[#5c6b57]">
-                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "Ø§Ù„ØµÙ†Ù" : "Item"}</th>
+                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "الصنف" : "Item"}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.sheet}</th>
-                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "Ø§Ù„ÙƒÙ…ÙŠØ© Ø§Ù„Ù…Ø³Ø­ÙˆØ¨Ø©" : "Taken"}</th>
+                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "الكمية المسحوبة" : "Taken"}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.remainingLabel}</th>
+                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "ملاحظة" : "Note"}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.lastUpdated}</th>
+                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.actions}</th>
                 </tr>
               </thead>
               <tbody>
-                {checkoutLog.slice(0, 8).map((entry) => (
+                {checkoutLog.map((entry) => (
                   <tr key={entry.id} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
                     <td className="px-4 py-2"><button onClick={() => openDetail(entry.catId, entry.rowId)} className="text-[#8a5a2e] hover:underline">{entry.desc || entry.ref || ""}</button></td>
                     <td className="px-4 py-2 text-[#5c6b57]">{entry.catName}</td>
-                    <td className="px-4 py-2 font-bold text-[#b23b3b]">âˆ’{entry.qtyTaken}</td>
+                    <td className="px-4 py-2 font-bold text-[#b23b3b]">-{entry.qtyTaken}</td>
                     <td className="px-4 py-2">{entry.remainingQty}</td>
-                    <td className="px-4 py-2 text-xs text-[#5c6b57] flex items-center gap-1"><Clock size={11} /> {timeAgo(entry.ts, t)}</td>
+                    <td className="px-4 py-2 text-[#5c6b57] max-w-[120px] truncate">{entry.note || ""}</td>
+                    <td className="px-4 py-2 text-xs text-[#5c6b57]"><span className="flex items-center gap-1"><Clock size={11} /> {timeAgo(entry.ts, t)}</span></td>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setModal({ kind: "editActivity", entryId: entry.id })} title={t.editActivity} className="text-[#5c6b57] hover:text-[#1f6f8b]"><Pencil size={14} /></button>
+                        <button onClick={() => setModal({ kind: "confirmDeleteActivity", entryId: entry.id })} title={t.deleteActivity} className="text-[#5c6b57] hover:text-red-600"><Trash2 size={14} /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Panel>
+
+        {isSupabaseEnabled() && (
+          <Panel icon={<History size={16} className="text-[#1f6f8b]" />} title={t.backupHistory}>
+            {backups.length > 0 && (
+              <div className={`px-5 pt-3 flex ${lang === "ar" ? "justify-start" : "justify-end"}`}>
+                <button
+                  type="button"
+                  onClick={() => setModal({ kind: "confirmClearBackups" })}
+                  className="text-xs px-3 py-1.5 rounded border border-red-200 text-red-700 hover:bg-red-50 font-semibold"
+                >
+                  {t.clearAllBackups}
+                </button>
+              </div>
+            )}
+            {backups.length === 0 ? (
+              <p className="p-5 text-sm text-[#5c6b57]">{t.noBackups}</p>
+            ) : (
+              <ul className="divide-y divide-[#2f3b2f]/10">
+                {backups.map((b) => (
+                  <li key={b.id} className="px-5 py-3 flex items-center justify-between gap-3 text-sm">
+                    <span className="text-[#5c6b57] flex items-center gap-1.5">
+                      <Clock size={12} />
+                      {new Date(b.created_at).toLocaleString(lang === "ar" ? "ar" : "en")}
+                    </span>
+                    <button
+                      onClick={() => restoreBackup(b.id)}
+                      className="text-xs px-3 py-1.5 rounded font-semibold text-white"
+                      style={{ backgroundColor: "#1f6f8b" }}
+                    >
+                      {t.restoreSnapshot}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        )}
 
         <Panel title={t.sheetTotals}>
           <table className="w-full text-sm">
@@ -403,7 +596,7 @@ export default function InventoryApp() {
         <StatCard label={t.itemCount} value={current.rows.length} accent="#4a6b52" />
         <StatCard label={t.lowStock} value={lowCount} accent={lowCount ? "#b23b3b" : "#4a6b52"}
           onClick={() => setModal({ kind: "threshold", catId: current.id, value: current.lowStockAt ?? 5 })}
-          hint={`${current.lowStockAt ?? 5} Â· ${t.editThreshold}`} />
+          hint={`${t.thresholdHint.replace("{n}", current.lowStockAt ?? 5)} · ${t.editThreshold}`} />
       </div>
 
       <div className="bg-[#fbfaf5] rounded-lg shadow-sm border border-[#2f3b2f]/10 overflow-hidden mb-8">
@@ -474,12 +667,12 @@ export default function InventoryApp() {
                         {col.key === "qty" ? (
                           <div className="flex items-center gap-1.5 justify-center">
                             <button onClick={() => bumpQty(current.id, r.id, -1)} title={lang === "ar" ? "Ø³Ø­Ø¨ ÙˆØ­Ø¯Ø©" : "Remove one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={12} /></button>
-                            <input type="number" value={r.values.qty ?? 0} onChange={(e) => changeCell(current.id, r.id, "qty", Number(e.target.value))}
+                            <SheetCellInput type="number" value={r.values.qty ?? 0} onCommit={(v) => changeCell(current.id, r.id, "qty", v)}
                               className={`w-16 text-center bg-transparent border rounded px-1 py-1 font-bold ${isLow ? "border-red-300 text-red-700" : "border-[#2f3b2f]/15"}`} />
                             <button onClick={() => bumpQty(current.id, r.id, 1)} title={lang === "ar" ? "Ø¥Ø¶Ø§ÙØ© ÙˆØ­Ø¯Ø©" : "Add one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"><Plus size={12} /></button>
                           </div>
                         ) : (
-                          <input type="text" value={r.values[col.key] ?? ""} onChange={(e) => changeCell(current.id, r.id, col.key, e.target.value)}
+                          <SheetCellInput type="text" value={r.values[col.key] ?? ""} onCommit={(v) => changeCell(current.id, r.id, col.key, v)}
                             className="w-full bg-transparent border border-transparent focus:border-[#2f3b2f]/20 rounded px-2 py-1" />
                         )}
                       </td>

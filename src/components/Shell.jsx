@@ -7,9 +7,9 @@ import { MATERIAL_TYPES } from "../constants/index.js";
 import { LocationBadge, TypeBadge } from "./ui.jsx";
 
 export default function Shell({
-  t, lang, setLang, title, subtitle, saving, categories, activeCat, setActiveCat, addCategory, undo, toast, dir,
+  t, lang, setLang, title, subtitle, saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat, addCategory, undo, toast, dir,
   globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, openDetail,
-  globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, children,
+  globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, loadError, children,
 }) {
   return (
     <div dir={dir} className="min-h-screen bg-[#f4f2ec] text-[#2f3b2f]" style={{ fontFamily: "Tahoma, 'Segoe UI', Arial, sans-serif" }}>
@@ -26,7 +26,7 @@ export default function Shell({
         <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-            <p className="text-sm text-[#5c6b57] mt-0.5">{subtitle}</p>
+            {subtitle ? <p className="text-sm text-[#5c6b57] mt-0.5">{subtitle}</p> : null}
           </div>
 
           <div className="relative flex-1 max-w-md" ref={globalBoxRef}>
@@ -88,8 +88,21 @@ export default function Shell({
               <HelpCircle size={14} /> {t.help}
             </button>
             <button onClick={undo} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border border-[#2f3b2f]/20 hover:bg-[#f4f2ec]"><Undo2 size={14} /> {t.undo}</button>
-            <div className="text-xs text-[#5c6b57] flex items-center gap-1 whitespace-nowrap">
-              {saving ? (<><Loader2 size={13} className="animate-spin" /> {t.saving}</>) : (<><Save size={13} /> {t.saved}</>)}
+            <div className="text-xs text-[#5c6b57] flex flex-col items-end gap-0.5 whitespace-nowrap">
+              <span className="flex items-center gap-1">
+                {saving ? (
+                  <><Loader2 size={13} className="animate-spin" /> {t.cloudSaving}</>
+                ) : cloudSynced ? (
+                  <><Save size={13} className="text-[#2e7d46]" /> {t.cloudSaved}</>
+                ) : (
+                  <><Save size={13} className="text-red-600" /> {t.cloudSaveFailed}</>
+                )}
+              </span>
+              {cloudSynced && cloudSavedAt && (
+                <span className="text-[10px] opacity-80">
+                  {new Date(cloudSavedAt).toLocaleString(lang === "ar" ? "ar" : "en")}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -111,6 +124,12 @@ export default function Shell({
             <FolderPlus size={16} /> {t.addSheet}
           </button>
         </div>
+
+        {loadError && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
+            {loadError}
+          </div>
+        )}
 
         {children}
 

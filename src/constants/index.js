@@ -16,12 +16,16 @@ export const MATERIAL_TYPES = [
 
 export const DEFAULT_COLUMNS = () => [
   { key: "desc", label: { en: "Width", ar: "العرض" }, type: "text" },
-  { key: "ref", label: { en: "Reference Code", ar: "الكود" }, type: "text" },
+  { key: "ref", label: { en: "Meters", ar: "متر" }, type: "text" },
   { key: "qty", label: { en: "Quantity", ar: "الكمية" }, type: "number" },
   { key: "notes", label: { en: "Notes", ar: "ملاحظات" }, type: "text" },
 ];
 
-export const STORAGE_KEY = "stock-ledger-v7";
+export const STORAGE_KEY = "stock-ledger-v9";
 export const STORAGE_KEY_LANG = "stock-ledger-lang";
 export const MAX_HISTORY = 30;
 export const MAX_LOG = 200;
+
+export function normalizeLocations(locations) {
+  return Array.isArray(locations) && locations.length > 0 ? locations : DEFAULT_LOCATIONS;
+}
