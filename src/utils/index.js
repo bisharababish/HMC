@@ -1,10 +1,63 @@
-import { DEFAULT_COLUMNS } from "../constants/index.js";
+import { DEFAULT_COLUMNS, MATERIAL_TYPES, METERS_CRITICAL_THRESHOLD, METERS_LOW_THRESHOLD, parseWidth, normalizeMeterRef, meterCodesForRow } from "../constants/index.js";
 import { nameOf } from "../i18n/strings.js";
-import { MATERIAL_TYPES } from "../constants/index.js";
 
 export function cat() { return "c_" + Math.random().toString(36).slice(2, 10); }
 export function rid() { return "r_" + Math.random().toString(36).slice(2, 10); }
 export function row(values) { return { id: rid(), values }; }
+
+/** Parse numeric value from the Meters (ref) field */
+export function parseMeters(ref) {
+  if (ref == null || ref === "") return 0;
+  const cleaned = String(ref).replace(/,/g, "").trim();
+  const direct = Number(cleaned);
+  if (!Number.isNaN(direct) && cleaned !== "") return direct;
+  const match = cleaned.match(/(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : 0;
+}
+
+export { normalizeMeterRef, meterCodesForRow, parseWidth };
+
+/** Total meters in stock = quantity × width */
+export function rowTotalMeters(row) {
+  const qty = Number(row?.values?.qty) || 0;
+  const width = parseWidth(row?.values?.desc, row?.values?.ref);
+  return qty * width;
+}
+
+export function isRowLowMeterStock(row) {
+  return rowMeterSeverity(row) !== null;
+}
+
+/** null = ok · low = below 10k (red) · critical = below 5k (yellow) · out = qty is zero */
+export function meterStockSeverity(meters, qty) {
+  const q = Number(qty) || 0;
+  if (q <= 0) return "out";
+  if (meters <= 0) return null;
+  if (meters < METERS_CRITICAL_THRESHOLD) return "critical";
+  if (meters < METERS_LOW_THRESHOLD) return "low";
+  return null;
+}
+
+export function isMeterLowStock(meters, qty) {
+  return meterStockSeverity(meters, qty) !== null;
+}
+
+export function rowMeterSeverity(row) {
+  const qty = Number(row?.values?.qty) || 0;
+  return meterStockSeverity(rowTotalMeters(row), qty);
+}
+
+export function meterRowClass(severity) {
+  if (severity === "out" || severity === "low") return "bg-red-50/50";
+  if (severity === "critical") return "bg-amber-50/70";
+  return "";
+}
+
+export function meterCellClass(severity) {
+  if (severity === "out" || severity === "low") return "border-red-300 text-red-700 font-bold bg-red-50/30";
+  if (severity === "critical") return "border-amber-400 text-amber-800 font-bold bg-amber-50/50";
+  return "border-transparent";
+}
 
 export function toCSV(category, locations, lang) {
   const cols = [

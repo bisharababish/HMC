@@ -28,7 +28,7 @@ COMMENT ON COLUMN public.app_state.data IS 'JSON snapshot — ALL live app data 
   checkoutLog[] → recent stock take-out activity
   lang          → "en" or "ar"';
 
--- Full backup on every save — use Dashboard → Backup History to restore
+-- Full backup on demand — use Dashboard → Save backup (not on every edit)
 CREATE TABLE IF NOT EXISTS public.change_log (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   data        JSONB       NOT NULL,

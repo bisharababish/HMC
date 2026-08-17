@@ -62,7 +62,7 @@ npm run dev
 | Table | What |
 |-------|------|
 | `app_state` | Live data: all sheets, items, meters, quantities, locations, recent activity |
-| `change_log` | Full JSON copy every time you save — for history & restore |
+| `change_log` | Optional manual snapshots — click **Save backup** on the dashboard |
 
 Data format is JSON (same as before, but online):
 

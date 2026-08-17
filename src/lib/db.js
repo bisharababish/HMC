@@ -21,9 +21,16 @@ async function cloudSet(value) {
     updated_at: updatedAt,
   });
   if (upsertErr) throw upsertErr;
-  const { error: logErr } = await supabase.from("change_log").insert({ data: parsed });
-  if (logErr) throw logErr;
   return updatedAt;
+}
+
+/** Manual snapshot only — not called on every auto-save */
+export async function createBackupSnapshot(data) {
+  if (!isSupabaseEnabled()) return false;
+  const parsed = typeof data === "string" ? JSON.parse(data) : data;
+  const { error } = await supabase.from("change_log").insert({ data: parsed });
+  if (error) throw error;
+  return true;
 }
 
 let lastSaveOk = false;
@@ -32,7 +39,7 @@ export function wasLastSaveCloud() {
   return lastSaveOk;
 }
 
-export async function fetchBackupHistory(limit = 15) {
+export async function fetchBackupHistory(limit = 100) {
   if (!isSupabaseEnabled()) return [];
   const { data, error } = await supabase
     .from("change_log")

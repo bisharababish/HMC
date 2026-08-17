@@ -1,18 +1,21 @@
 ﻿import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Plus, Minus, Trash2, PlusCircle, Loader2,
-  Search, ArrowUpDown, X, MapPin, AlertTriangle, Eye, PackageMinus, Clock, History, Pencil, Cloud,
+  Search, ArrowUpDown, X, MapPin, AlertTriangle, Eye, PackageMinus, Clock, History, Pencil,
 } from "lucide-react";
 import { STR, nameOf, timeAgo } from "./i18n/strings.js";
 import { DEFAULT_LOCATIONS, MATERIAL_TYPES, STORAGE_KEY, MAX_HISTORY, MAX_LOG, normalizeLocations } from "./constants/index.js";
-import { seedCategories, row, rid, toCSV, downloadText, swapPlasticSheetNames } from "./utils/index.js";
+import { seedCategories, row, rid, toCSV, downloadText, swapPlasticSheetNames, parseWidth, normalizeMeterRef, rowTotalMeters, rowMeterSeverity, isRowLowMeterStock, meterRowClass, meterCellClass } from "./utils/index.js";
+import { widthsForRow, meterCodesForRow } from "./constants/index.js";
 import Shell from "./components/Shell.jsx";
 import ModalHost from "./components/ModalHost.jsx";
+import StorageModule from "./StorageModule.jsx";
+import { seedStorageSites, normalizeStorageSites } from "./constants/storages.js";
 import Pagination from "./components/Pagination.jsx";
 import OverflowMenu from "./components/OverflowMenu.jsx";
-import { fetchBackupHistory, loadBackupSnapshot, wasLastSaveCloud, clearAllBackups } from "./lib/db.js";
+import { fetchBackupHistory, loadBackupSnapshot, wasLastSaveCloud, clearAllBackups, createBackupSnapshot } from "./lib/db.js";
 import { isSupabaseEnabled } from "./lib/supabase.js";
-import { Panel, StatCard, LocationBadge, TypeBadge, LocationSelect, SheetCellInput } from "./components/ui.jsx";
+import { Panel, StatCard, LocationBadge, TypeBadge, LocationSelect, SheetCellInput, WidthSelect, MetersCodeSelect } from "./components/ui.jsx";
 export default function InventoryApp() {
   const [categories, setCategories] = useState(null);
   const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
@@ -37,10 +40,15 @@ export default function InventoryApp() {
   const [pageSize, setPageSize] = useState(5);
   const [lowStockPage, setLowStockPage] = useState(1);
   const [lowStockPageSize, setLowStockPageSize] = useState(5);
+  const [backupPage, setBackupPage] = useState(1);
+  const [backupPageSize, setBackupPageSize] = useState(3);
   const [cloudSynced, setCloudSynced] = useState(true);
   const [cloudSavedAt, setCloudSavedAt] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [backups, setBackups] = useState([]);
+  const [activeModule, setActiveModule] = useState("labeling");
+  const [storageSites, setStorageSites] = useState(null);
+  const [storageLog, setStorageLog] = useState([]);
   const saveTimer = useRef(null);
   const history = useRef([]);
   const globalBoxRef = useRef(null);
@@ -54,6 +62,7 @@ export default function InventoryApp() {
         setLoadError("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env, then restart the dev server.");
         setCategories([]);
         setLocations(DEFAULT_LOCATIONS);
+        setStorageSites(seedStorageSites());
         setActiveCat("__dashboard__");
         setLoaded(true);
         return;
@@ -70,11 +79,15 @@ export default function InventoryApp() {
           }
           setLocations(normalizeLocations(parsed.locations));
           setCheckoutLog(parsed.checkoutLog || []);
+          setStorageSites(normalizeStorageSites(parsed.storageSites));
+          setStorageLog(parsed.storageLog || []);
+          if (parsed.activeModule === "labeling" || parsed.activeModule === "storages") setActiveModule(parsed.activeModule);
           if (parsed.lang === "en" || parsed.lang === "ar") setLang(parsed.lang);
           if (res.updated_at) setCloudSavedAt(res.updated_at);
         } else {
           setCategories([]);
           setLocations(DEFAULT_LOCATIONS);
+          setStorageSites(seedStorageSites());
         }
         setBackups(await fetchBackupHistory());
       } catch (e) {
@@ -82,6 +95,7 @@ export default function InventoryApp() {
         setLoadError("Could not load from Supabase. Check your connection and SQL setup.");
         setCategories([]);
         setLocations(DEFAULT_LOCATIONS);
+        setStorageSites(seedStorageSites());
       }
       setActiveCat("__dashboard__");
       setLoaded(true);
@@ -103,7 +117,6 @@ export default function InventoryApp() {
         const savedAt = await window.storage.set(STORAGE_KEY, JSON.stringify(data), false);
         setCloudSynced(wasLastSaveCloud());
         if (savedAt) setCloudSavedAt(savedAt);
-        setBackups(await fetchBackupHistory());
       } catch (e) {
         setCloudSynced(false);
         showToast(lang === "ar" ? "فشل الحفظ على السحابة" : "Cloud save failed");
@@ -113,10 +126,19 @@ export default function InventoryApp() {
   }, [lang]);
 
   useEffect(() => {
-    if (!loaded || !categories) return;
-    persist({ categories, locations: normalizeLocations(locations), checkoutLog, lang });
-  }, [categories, locations, checkoutLog, lang, loaded, persist]);
+    if (!loaded || !categories || !storageSites) return;
+    persist({
+      categories,
+      locations: normalizeLocations(locations),
+      checkoutLog,
+      lang,
+      activeModule,
+      storageSites,
+      storageLog,
+    });
+  }, [categories, locations, checkoutLog, lang, activeModule, storageSites, storageLog, loaded, persist]);
   useEffect(() => { setPage(1); }, [activeCat, query, locFilter, typeFilter, sortKey]);
+  useEffect(() => { setBackupPage(1); }, [backups.length, backupPageSize]);
 
   useEffect(() => {
     const onClick = (e) => { if (globalBoxRef.current && !globalBoxRef.current.contains(e.target)) setGlobalOpen(false); };
@@ -138,7 +160,7 @@ export default function InventoryApp() {
     showToast(t.toastUndone);
   };
 
-  if (!loaded || !categories) {
+  if (!loaded || !categories || !storageSites) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f2ec]">
         <div className="flex items-center gap-2 text-[#2f3b2f]">
@@ -196,6 +218,20 @@ export default function InventoryApp() {
   const deleteCategoryNow = (catId) => {
     withHistory((prev) => prev.filter((c) => c.id !== catId));
     setActiveCat("__dashboard__");
+  };
+
+  const deleteLocationNow = (locId) => {
+    if (locId === "loc_unassigned") return;
+    withHistory((prev) => prev.map((c) => ({
+      ...c,
+      rows: c.rows.map((r) =>
+        r.values.location === locId
+          ? { ...r, values: { ...r.values, location: "loc_unassigned" } }
+          : r
+      ),
+    })));
+    setLocations((prev) => prev.filter((l) => l.id !== locId));
+    showToast(t.toastLocationDeleted);
   };
 
   const jumpToResult = (catId, rowId) => {
@@ -293,6 +329,9 @@ export default function InventoryApp() {
     setCategories(swapPlasticSheetNames(data.categories || data));
     setLocations(normalizeLocations(data.locations));
     setCheckoutLog(data.checkoutLog || []);
+    setStorageSites(normalizeStorageSites(data.storageSites));
+    setStorageLog(data.storageLog || []);
+    if (data.activeModule === "labeling" || data.activeModule === "storages") setActiveModule(data.activeModule);
     if (data.lang === "en" || data.lang === "ar") setLang(data.lang);
     showToast(t.snapshotRestored);
   };
@@ -302,6 +341,24 @@ export default function InventoryApp() {
       await clearAllBackups();
       setBackups([]);
       showToast(t.toastBackupsCleared);
+    } catch {
+      showToast(t.cloudSaveFailed);
+    }
+  };
+
+  const saveBackupNow = async () => {
+    try {
+      await createBackupSnapshot({
+        categories,
+        locations: normalizeLocations(locations),
+        checkoutLog,
+        lang,
+        activeModule,
+        storageSites,
+        storageLog,
+      });
+      setBackups(await fetchBackupHistory());
+      showToast(t.toastBackupSaved);
     } catch {
       showToast(t.cloudSaveFailed);
     }
@@ -317,12 +374,32 @@ export default function InventoryApp() {
     addCategory: () => setModal({ kind: "addSheet" }), undo, toast, dir,
     globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, jumpToResult, openDetail,
     globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, loadError,
+    activeModule, setActiveModule,
   };
+
+  if (activeModule === "storages") {
+    return (
+      <StorageModule
+        sites={storageSites}
+        setSites={setStorageSites}
+        storageLog={storageLog}
+        setStorageLog={setStorageLog}
+        lang={lang}
+        setLang={setLang}
+        activeModule={activeModule}
+        setActiveModule={setActiveModule}
+        saving={saving}
+        cloudSynced={cloudSynced}
+        cloudSavedAt={cloudSavedAt}
+        loadError={loadError}
+      />
+    );
+  }
 
   const modalHostProps = {
     modal, setModal, t, lang, categories, locations, checkoutLog, setLocations, withHistory, setActiveCat, showToast,
     deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult, typeOf, locOf,
-    deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity,
+    deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity, deleteLocationNow,
   };
 
   // ============================= Dashboard =============================
@@ -330,15 +407,18 @@ export default function InventoryApp() {
     const grand = categories.reduce((s, c) => s + c.rows.reduce((rs, r) => rs + (Number(r.values.qty) || 0), 0), 0);
     const lowStockItems = [];
     categories.forEach((c) => c.rows.forEach((r) => {
-      const q = Number(r.values.qty) || 0;
-      const thresh = c.lowStockAt ?? 5;
-      if (q <= thresh) {
-        const deficit = Math.max(0, thresh - q);
-        const severity = q === 0 ? "out" : q <= thresh / 2 ? "critical" : "low";
-        lowStockItems.push({ cat: nameOf(c.name, lang), catId: c.id, rowId: r.id, desc: r.values.desc, ref: r.values.ref, qty: q, thresh, deficit, severity, location: locOf(r.values.location), material: typeOf(r.values.type), lastUpdated: r.values.lastUpdated });
+      const totalMeters = rowTotalMeters(r);
+      const severity = rowMeterSeverity(r);
+      if (severity) {
+        const target = severity === "out" ? 0 : severity === "critical" ? 5000 : 10000;
+        const deficit = severity === "out" ? 0 : Math.max(0, target - totalMeters);
+        const qty = Number(r.values.qty) || 0;
+        const width = parseWidth(r.values.desc, r.values.ref);
+        const meterCode = normalizeMeterRef(r.values.ref) || r.values.ref;
+        lowStockItems.push({ cat: nameOf(c.name, lang), catId: c.id, rowId: r.id, desc: r.values.desc, ref: meterCode, qty, width, totalMeters, deficit, severity, location: locOf(r.values.location), material: typeOf(r.values.type), lastUpdated: r.values.lastUpdated });
       }
     }));
-    lowStockItems.sort((a, b) => a.qty - b.qty);
+    lowStockItems.sort((a, b) => a.totalMeters - b.totalMeters);
     const lowStockTotalPages = Math.max(1, Math.ceil(lowStockItems.length / lowStockPageSize));
     const safeLowStockPage = Math.min(lowStockPage, lowStockTotalPages);
     const pagedLowStock = lowStockItems.slice((safeLowStockPage - 1) * lowStockPageSize, safeLowStockPage * lowStockPageSize);
@@ -349,28 +429,14 @@ export default function InventoryApp() {
       categories.forEach((c) => c.rows.forEach((r) => { if (r.values.location === loc.id) { count++; qty += Number(r.values.qty) || 0; } }));
       return { ...loc, count, qty };
     });
-
-    const itemCount = categories.reduce((n, c) => n + c.rows.length, 0);
+    const backupTotalPages = Math.max(1, Math.ceil(backups.length / backupPageSize));
+    const safeBackupPage = Math.min(backupPage, backupTotalPages);
+    const pagedBackups = backups.slice((safeBackupPage - 1) * backupPageSize, safeBackupPage * backupPageSize);
+    const backupRangeStart = backups.length === 0 ? 0 : (safeBackupPage - 1) * backupPageSize + 1;
+    const backupRangeEnd = Math.min(backups.length, safeBackupPage * backupPageSize);
 
     return (
       <Shell {...shellProps}>
-        {isSupabaseEnabled() && (
-          <div className="mb-6 rounded-lg border border-[#2e7d46]/25 bg-[#f0f7f2] px-5 py-4">
-            <div className="flex items-start gap-2">
-              <Cloud size={18} className="text-[#2e7d46] shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-[#2f3b2f] text-sm">{t.cloudStorageTitle}</p>
-                <p className="text-xs text-[#5c6b57] mt-1">{t.cloudStorageBody}</p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs font-semibold text-[#2f3b2f]">
-                  <span>{categories.length} {t.sheets.toLowerCase()}</span>
-                  <span>{itemCount} {t.items}</span>
-                  <span>{locations.length} {lang === "ar" ? "مواقع" : "locations"}</span>
-                  <span>{checkoutLog.length} {lang === "ar" ? "سجلات نشاط" : "activity entries"}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
         {categories.length === 0 ? (
           <div className="mb-6 rounded-lg border border-dashed border-[#2f3b2f]/25 bg-[#fbfaf5] p-8 text-center">
             <p className="text-[#2f3b2f] font-semibold mb-2">{lang === "ar" ? "لا توجد أوراق بعد" : "No sheets yet"}</p>
@@ -390,12 +456,18 @@ export default function InventoryApp() {
         <Panel icon={<MapPin size={16} className="text-[#4a6b52]" />} title={t.byLocation}>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 p-4">
             {byLocation.map((loc) => (
-              <div key={loc.id} className="rounded-lg border p-3 flex items-center justify-between" style={{ borderColor: loc.color + "40", background: loc.color + "0d" }}>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: loc.color }} />
-                  <span className="text-sm font-semibold">{nameOf(loc.name, lang)}</span>
+              <div key={loc.id} className="rounded-lg border p-3 flex items-center justify-between gap-2" style={{ borderColor: loc.color + "40", background: loc.color + "0d" }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: loc.color }} />
+                  <span className="text-sm font-semibold truncate">{nameOf(loc.name, lang)}</span>
                 </div>
-                <div className="text-xs text-[#5c6b57]">{loc.count} {t.items} · {loc.qty} {t.units}</div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-[#5c6b57]">{loc.count} {t.items} · {loc.qty} {t.units}</span>
+                  <button type="button" onClick={() => setModal({ kind: "editLocation", locId: loc.id })} title={t.editLocation}
+                    className="text-[#5c6b57] hover:text-[#1f6f8b] p-1 rounded hover:bg-white/60">
+                    <Pencil size={14} />
+                  </button>
+                </div>
               </div>
             ))}
             <button onClick={() => setModal({ kind: "addLocation" })} className="rounded-lg border border-dashed border-[#2f3b2f]/25 p-3 text-sm text-[#5c6b57] hover:bg-[#f4f2ec] flex items-center justify-center gap-1.5">
@@ -413,10 +485,12 @@ export default function InventoryApp() {
                 <thead>
                   <tr className="bg-[#f4f2ec] text-[#5c6b57]">
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.sheet}</th>
-                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "Ø§Ù„ØµÙ†Ù" : "Item"}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.materialType}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.location}</th>
-                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "Ø§Ù„ÙƒÙ…ÙŠØ©" : "Qty"}</th>
+                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "العرض" : "Width"}</th>
+                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.itemCount}</th>
+                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "متر" : "Meters"}</th>
+                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.totalMetersLabel}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.deficitLabel}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.severity}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.lastUpdated}</th>
@@ -426,15 +500,17 @@ export default function InventoryApp() {
                   {pagedLowStock.map((it, i) => (
                     <tr key={i} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
                       <td className="px-4 py-2"><button onClick={() => openDetail(it.catId, it.rowId)} className="text-[#8a5a2e] hover:underline">{it.cat}</button></td>
-                      <td className="px-4 py-2">{it.desc || it.ref || ""}</td>
                       <td className="px-4 py-2"><TypeBadge type={it.material} lang={lang} /></td>
                       <td className="px-4 py-2"><LocationBadge loc={it.location} lang={lang} /></td>
-                      <td className="px-4 py-2 font-bold text-[#b23b3b]">{it.qty} / {it.thresh}</td>
-                      <td className="px-4 py-2">{it.deficit}</td>
+                      <td className="px-4 py-2">{it.desc || "—"}</td>
+                      <td className="px-4 py-2">{it.qty}</td>
+                      <td className="px-4 py-2">{it.ref || "—"}</td>
+                      <td className="px-4 py-2 font-bold text-[#b23b3b]">{it.totalMeters.toLocaleString()}</td>
+                      <td className="px-4 py-2">{it.deficit.toLocaleString()}</td>
                       <td className="px-4 py-2">
                         {it.severity === "out" && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-600 text-white">{t.outOfStock}</span>}
-                        {it.severity === "critical" && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{t.critical}</span>}
-                        {it.severity === "low" && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{t.lowSeverity}</span>}
+                        {it.severity === "low" && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{t.lowSeverity}</span>}
+                        {it.severity === "critical" && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">{t.critical}</span>}
                       </td>
                       <td className="px-4 py-2 text-xs text-[#5c6b57] flex items-center gap-1"><Clock size={11} /> {timeAgo(it.lastUpdated, t)}</td>
                     </tr>
@@ -502,8 +578,16 @@ export default function InventoryApp() {
 
         {isSupabaseEnabled() && (
           <Panel icon={<History size={16} className="text-[#1f6f8b]" />} title={t.backupHistory}>
-            {backups.length > 0 && (
-              <div className={`px-5 pt-3 flex ${lang === "ar" ? "justify-start" : "justify-end"}`}>
+            <div className={`px-5 pt-3 flex flex-wrap gap-2 ${lang === "ar" ? "justify-start" : "justify-end"}`}>
+              <button
+                type="button"
+                onClick={saveBackupNow}
+                className="text-xs px-3 py-1.5 rounded font-semibold text-white"
+                style={{ backgroundColor: "#1f6f8b" }}
+              >
+                {t.saveBackupNow}
+              </button>
+              {backups.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setModal({ kind: "confirmClearBackups" })}
@@ -511,13 +595,14 @@ export default function InventoryApp() {
                 >
                   {t.clearAllBackups}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
             {backups.length === 0 ? (
               <p className="p-5 text-sm text-[#5c6b57]">{t.noBackups}</p>
             ) : (
+              <>
               <ul className="divide-y divide-[#2f3b2f]/10">
-                {backups.map((b) => (
+                {pagedBackups.map((b) => (
                   <li key={b.id} className="px-5 py-3 flex items-center justify-between gap-3 text-sm">
                     <span className="text-[#5c6b57] flex items-center gap-1.5">
                       <Clock size={12} />
@@ -533,6 +618,20 @@ export default function InventoryApp() {
                   </li>
                 ))}
               </ul>
+              <Pagination
+                t={t}
+                lang={lang}
+                page={safeBackupPage}
+                totalPages={backupTotalPages}
+                setPage={setBackupPage}
+                pageSize={backupPageSize}
+                setPageSize={setBackupPageSize}
+                pageSizeOptions={[1, 2, 3]}
+                rangeStart={backupRangeStart}
+                rangeEnd={backupRangeEnd}
+                totalRows={backups.length}
+              />
+              </>
             )}
           </Panel>
         )}
@@ -579,7 +678,7 @@ export default function InventoryApp() {
     });
   }
   const total = current.rows.reduce((sum, r) => sum + (Number(r.values.qty) || 0), 0);
-  const lowCount = current.rows.filter((r) => (Number(r.values.qty) || 0) <= (current.lowStockAt ?? 5)).length;
+  const lowCount = current.rows.filter((r) => isRowLowMeterStock(r)).length;
   const toggleSort = (key) => { if (sortKey === key) setSortDir((d) => -d); else { setSortKey(key); setSortDir(1); } };
   const qtyColIndex = current.columns.findIndex((c) => c.key === "qty");
 
@@ -594,9 +693,7 @@ export default function InventoryApp() {
       <div className="grid sm:grid-cols-3 gap-4 mb-5">
         <StatCard label={t.totalUnits} value={total} accent="#8a5a2e" />
         <StatCard label={t.itemCount} value={current.rows.length} accent="#4a6b52" />
-        <StatCard label={t.lowStock} value={lowCount} accent={lowCount ? "#b23b3b" : "#4a6b52"}
-          onClick={() => setModal({ kind: "threshold", catId: current.id, value: current.lowStockAt ?? 5 })}
-          hint={`${t.thresholdHint.replace("{n}", current.lowStockAt ?? 5)} · ${t.editThreshold}`} />
+        <StatCard label={t.lowStock} value={lowCount} accent={lowCount ? "#b23b3b" : "#4a6b52"} />
       </div>
 
       <div className="bg-[#fbfaf5] rounded-lg shadow-sm border border-[#2f3b2f]/10 overflow-hidden mb-8">
@@ -654,23 +751,45 @@ export default function InventoryApp() {
                 <tr><td colSpan={current.columns.length + 3} className="px-4 py-8 text-center text-[#5c6b57]">{t.noResultsRow}</td></tr>
               )}
               {pagedRows.map((r, i) => {
-                const q = Number(r.values.qty) || 0;
-                const isLow = q <= (current.lowStockAt ?? 5);
+                const severity = rowMeterSeverity(r);
+                const totalMeters = rowTotalMeters(r);
+                const widthOpts = widthsForRow(r, current);
+                const meterOpts = meterCodesForRow(r, current);
                 const isFlashed = flashRow === r.id;
                 return (
                   <tr id={`row-${r.id}`} key={r.id}
-                      className={`border-t border-[#2f3b2f]/10 transition-colors duration-700 ${isFlashed ? "row-flash" : isLow ? "bg-red-50/40" : "hover:bg-[#f4f2ec]/60"}`}>
+                      className={`border-t border-[#2f3b2f]/10 transition-colors duration-700 ${isFlashed ? "row-flash" : meterRowClass(severity) || "hover:bg-[#f4f2ec]/60"}`}>
                     <td className="px-3 py-2 text-[#8a5a2e] font-semibold">{(safePage - 1) * pageSize + i + 1}</td>
                     <td className="px-3 py-1.5"><LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(current.id, r.id, "location", v)} /></td>
                     {current.columns.map((col) => (
                       <td key={col.key} className="px-3 py-1.5">
                         {col.key === "qty" ? (
                           <div className="flex items-center gap-1.5 justify-center">
-                            <button onClick={() => bumpQty(current.id, r.id, -1)} title={lang === "ar" ? "Ø³Ø­Ø¨ ÙˆØ­Ø¯Ø©" : "Remove one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={12} /></button>
+                            <button onClick={() => bumpQty(current.id, r.id, -1)} title={lang === "ar" ? "سحب وحدة" : "Remove one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={12} /></button>
                             <SheetCellInput type="number" value={r.values.qty ?? 0} onCommit={(v) => changeCell(current.id, r.id, "qty", v)}
-                              className={`w-16 text-center bg-transparent border rounded px-1 py-1 font-bold ${isLow ? "border-red-300 text-red-700" : "border-[#2f3b2f]/15"}`} />
-                            <button onClick={() => bumpQty(current.id, r.id, 1)} title={lang === "ar" ? "Ø¥Ø¶Ø§ÙØ© ÙˆØ­Ø¯Ø©" : "Add one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"><Plus size={12} /></button>
+                              className="w-16 text-center bg-transparent border border-[#2f3b2f]/15 rounded px-1 py-1 font-bold" />
+                            <button onClick={() => bumpQty(current.id, r.id, 1)} title={lang === "ar" ? "إضافة وحدة" : "Add one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"><Plus size={12} /></button>
                           </div>
+                        ) : col.key === "desc" && widthOpts.length > 0 ? (
+                          <WidthSelect value={r.values.desc ?? ""} options={widthOpts} lang={lang}
+                            onChange={(v) => changeCell(current.id, r.id, "desc", v)} />
+                        ) : col.key === "ref" && meterOpts.length > 0 ? (
+                          <>
+                            <MetersCodeSelect value={r.values.ref ?? ""} options={meterOpts} lang={lang}
+                              onChange={(v) => changeCell(current.id, r.id, "ref", v)} />
+                            {totalMeters > 0 && (
+                              <div className="text-[10px] text-[#5c6b57] mt-0.5 text-center">{totalMeters.toLocaleString()} {lang === "ar" ? "م كلي" : "m total"}</div>
+                            )}
+                          </>
+                        ) : col.key === "ref" ? (
+                          <>
+                            <SheetCellInput type="text" value={r.values.ref ?? ""} onCommit={(v) => changeCell(current.id, r.id, "ref", v)}
+                              placeholder={t.metersCodeHint}
+                              className={`w-full bg-transparent border rounded px-2 py-1 ${meterCellClass(severity)}`} />
+                            {totalMeters > 0 && (
+                              <div className="text-[10px] text-[#5c6b57] mt-0.5 text-center">{totalMeters.toLocaleString()} {lang === "ar" ? "م كلي" : "m total"}</div>
+                            )}
+                          </>
                         ) : (
                           <SheetCellInput type="text" value={r.values[col.key] ?? ""} onCommit={(v) => changeCell(current.id, r.id, col.key, v)}
                             className="w-full bg-transparent border border-transparent focus:border-[#2f3b2f]/20 rounded px-2 py-1" />

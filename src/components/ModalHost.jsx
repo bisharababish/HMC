@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Tag, Minus, Plus, PackageMinus, Clock } from "lucide-react";
 import { nameOf, timeAgo } from "../i18n/strings.js";
-import { mkCat } from "../utils/index.js";
+import { mkCat, parseWidth, normalizeMeterRef, rowTotalMeters, rowMeterSeverity } from "../utils/index.js";
 import { LocationSelect, TypeSelect } from "./ui.jsx";
 
 function modalKeyOf(modal) {
   if (!modal) return "";
-  return `${modal.kind}:${modal.catId ?? ""}:${modal.rowId ?? ""}:${modal.entryId ?? ""}`;
+  return `${modal.kind}:${modal.catId ?? ""}:${modal.rowId ?? ""}:${modal.entryId ?? ""}:${modal.locId ?? ""}`;
 }
 
 function ModalWrap({ children, title, danger, wide, onClose }) {
@@ -52,7 +52,7 @@ function ModalButtons({ onClose, onConfirm, confirmLabel, danger, disabled, canc
 
 export default function ModalHost({ modal, setModal, t, lang, categories, locations, checkoutLog, setLocations, withHistory, setActiveCat, showToast,
   deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult,
-  deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity }) {
+  deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity, deleteLocationNow }) {
   const [f1, setF1] = useState("");
   const [f2, setF2] = useState("");
   const [colType, setColType] = useState("text");
@@ -60,6 +60,7 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
   const [takeAmt, setTakeAmt] = useState(1);
   const [takeNote, setTakeNote] = useState("");
   const [restoreStock, setRestoreStock] = useState(true);
+  const [locColor, setLocColor] = useState("#2e7d46");
   const firstInputRef = useRef(null);
   const modalKey = modalKeyOf(modal);
 
@@ -70,6 +71,7 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
     setColType("text");
     setTakeNote("");
     setRestoreStock(true);
+    setLocColor("#2e7d46");
     if (modal.kind === "threshold") setNumVal(modal.value ?? 5);
     if (modal.kind === "itemDetail") setTakeAmt(1);
     const id = requestAnimationFrame(() => firstInputRef.current?.focus());
@@ -85,8 +87,26 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
     }
   }, [modalKey, checkoutLog, modal]);
 
+  useEffect(() => {
+    if (modal?.kind !== "editLocation") return;
+    const loc = locations?.find((l) => l.id === modal.locId);
+    if (loc) {
+      setF1(loc.name?.en || "");
+      setF2(loc.name?.ar || "");
+      setLocColor(loc.color || "#2e7d46");
+    }
+  }, [modalKey, locations, modal]);
+
   if (!modal) return null;
   const close = () => setModal(null);
+
+  const LocationColorField = () => (
+    <div className="mb-3">
+      <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.locationColor}</label>
+      <input type="color" value={locColor} onChange={(e) => setLocColor(e.target.value)}
+        className="w-full h-10 rounded border border-[#2f3b2f]/20 bg-white cursor-pointer" />
+    </div>
+  );
 
   if (modal.kind === "addColumn") {
     return (
@@ -119,12 +139,49 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
       <ModalWrap title={t.addLocationTitle} onClose={close}>
         <ModalField inputRef={firstInputRef} label={t.locationNameEn} value={f1} onChange={setF1} placeholder="e.g. Warehouse 2" />
         <ModalField label={t.locationNameAr} value={f2} onChange={setF2} placeholder="مثال: المخزن ٢" />
+        <LocationColorField />
         <ModalButtons cancelLabel={t.cancel} onClose={close} confirmLabel={t.add} disabled={!f1.trim() && !f2.trim()} onConfirm={() => {
           const palette = ["#2e7d46", "#8a5a2e", "#6b4fa0", "#1f6f8b", "#b23b3b", "#a8842e", "#4a7c8c"];
-          setLocations((prev) => [...prev, { id: "loc_" + Math.random().toString(36).slice(2, 8), name: { en: f1.trim() || f2.trim(), ar: f2.trim() || f1.trim() }, color: palette[prev.length % palette.length] }]);
+          setLocations((prev) => [...prev, { id: "loc_" + Math.random().toString(36).slice(2, 8), name: { en: f1.trim() || f2.trim(), ar: f2.trim() || f1.trim() }, color: locColor || palette[prev.length % palette.length] }]);
           showToast(t.toastLocationAdded);
           close();
         }} />
+      </ModalWrap>
+    );
+  }
+
+  if (modal.kind === "editLocation") {
+    const loc = locations.find((l) => l.id === modal.locId);
+    if (!loc) return null;
+    return (
+      <ModalWrap title={t.editLocationTitle} onClose={close}>
+        <ModalField inputRef={firstInputRef} label={t.locationNameEn} value={f1} onChange={setF1} placeholder="e.g. Warehouse 2" />
+        <ModalField label={t.locationNameAr} value={f2} onChange={setF2} placeholder="مثال: المخزن ٢" />
+        <LocationColorField />
+        <ModalButtons cancelLabel={t.cancel} onClose={close} confirmLabel={t.save} disabled={!f1.trim() && !f2.trim()} onConfirm={() => {
+          setLocations((prev) => prev.map((l) => l.id === modal.locId
+            ? { ...l, name: { en: f1.trim() || f2.trim(), ar: f2.trim() || f1.trim() }, color: locColor }
+            : l));
+          showToast(t.toastLocationUpdated);
+          close();
+        }} />
+        {modal.locId !== "loc_unassigned" && (
+          <button type="button" onClick={() => setModal({ kind: "confirmDeleteLocation", locId: modal.locId })}
+            className="w-full mt-3 py-2 rounded border border-red-200 text-red-700 text-sm font-semibold hover:bg-red-50">
+            {t.deleteLocation}
+          </button>
+        )}
+      </ModalWrap>
+    );
+  }
+
+  if (modal.kind === "confirmDeleteLocation") {
+    const loc = locations.find((l) => l.id === modal.locId);
+    return (
+      <ModalWrap title={t.confirmDeleteLocationTitle} danger onClose={close}>
+        <p className="text-sm text-[#5c6b57]">{t.confirmDeleteLocationBody}</p>
+        {loc && <p className="text-sm font-semibold mt-2">{nameOf(loc.name, lang)}</p>}
+        <ModalButtons cancelLabel={t.cancel} onClose={close} danger confirmLabel={t.delete} onConfirm={() => { deleteLocationNow(modal.locId); close(); }} />
       </ModalWrap>
     );
   }
@@ -236,15 +293,24 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
     const r = c?.rows.find((rr) => rr.id === modal.rowId);
     if (!c || !r) return null;
     const qty = Number(r.values.qty) || 0;
-    const isLow = qty <= (c.lowStockAt ?? 5);
+    const width = parseWidth(r.values.desc, r.values.ref);
+    const meterCode = normalizeMeterRef(r.values.ref) || r.values.ref || "";
+    const totalMeters = rowTotalMeters(r);
+    const meterSev = rowMeterSeverity(r);
     const clampedTake = Math.max(1, Math.min(takeAmt || 1, Math.max(1, qty)));
 
     return (
       <ModalWrap title={t.itemDetails} wide onClose={close}>
         <div className="mb-4">
           <div className="text-xs text-[#5c6b57] mb-1 flex items-center gap-1"><Tag size={11} /> {nameOf(c.name, lang)}</div>
-          <div className="text-lg font-bold">{r.values.desc || r.values.ref || ""}</div>
-          {r.values.ref && <div className="text-xs text-[#5c6b57]">{lang === "ar" ? "متر" : "Meters"}: {r.values.ref}</div>}
+          <div className="text-lg font-bold">{r.values.desc || "—"}</div>
+          {(width > 0 || qty > 0) && (
+            <div className="text-xs text-[#5c6b57] mt-1">
+              {qty} × {width.toLocaleString()} {lang === "ar" ? "عرض" : "width"}
+              {meterCode ? ` · ${lang === "ar" ? "رمز" : "code"} ${meterCode}` : ""}
+              {" = "}<span className="font-semibold">{totalMeters.toLocaleString()} {lang === "ar" ? "م كلي" : "m total"}</span>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -258,10 +324,15 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
           </div>
         </div>
 
-        <div className={`rounded-lg border p-3 mb-4 flex items-center justify-between ${isLow ? "border-red-200 bg-red-50" : "border-[#2f3b2f]/10 bg-[#f4f2ec]"}`}>
+        <div className={`rounded-lg border p-3 mb-4 flex items-center justify-between ${meterSev === "low" || meterSev === "out" ? "border-red-200 bg-red-50" : meterSev === "critical" ? "border-amber-300 bg-amber-50" : "border-[#2f3b2f]/10 bg-[#f4f2ec]"}`}>
           <div>
             <div className="text-xs text-[#5c6b57]">{t.availableQty}</div>
-            <div className={`text-2xl font-bold ${isLow ? "text-red-700" : "text-[#2f3b2f]"}`}>{qty}</div>
+            <div className={`text-2xl font-bold ${meterSev ? "text-red-700" : "text-[#2f3b2f]"}`}>{qty}</div>
+            {r.values.ref && (
+              <div className={`text-sm mt-1 font-semibold ${meterSev === "critical" ? "text-amber-800" : meterSev ? "text-red-700" : "text-[#5c6b57]"}`}>
+                {lang === "ar" ? "إجمالي الأمتار" : "Total meters"}: {totalMeters.toLocaleString()}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
             <button type="button" onClick={() => bumpQty(c.id, r.id, -1)} className="w-8 h-8 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={14} /></button>

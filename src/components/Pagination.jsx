@@ -1,12 +1,12 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-export default function Pagination({ t, lang, page, totalPages, setPage, pageSize, setPageSize, rangeStart, rangeEnd, totalRows }) {
+export default function Pagination({ t, lang, page, totalPages, setPage, pageSize, setPageSize, rangeStart, rangeEnd, totalRows, pageSizeOptions = [5, 10, 15, 20] }) {
   return (
     <div className="flex items-center justify-between px-5 py-3 border-t border-[#2f3b2f]/10 bg-[#f4f2ec] flex-wrap gap-3 text-xs text-[#5c6b57]">
       <div className="flex items-center gap-2">
         <span>{t.rowsPerPage}</span>
         <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} className="px-2 py-1 rounded border border-[#2f3b2f]/20 bg-white outline-none">
-          {[5, 10, 15, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+          {pageSizeOptions.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
         <span>{t.showingRange} {rangeStart}–{rangeEnd} {t.of} {totalRows}</span>
       </div>

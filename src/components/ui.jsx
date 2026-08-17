@@ -1,7 +1,7 @@
 import { ChevronDown, Layers } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { nameOf } from "../i18n/strings.js";
-import { DEFAULT_LOCATIONS, MATERIAL_TYPES } from "../constants/index.js";
+import { DEFAULT_LOCATIONS, MATERIAL_TYPES, normalizeMeterRef } from "../constants/index.js";
 
 const FALLBACK_LOC = DEFAULT_LOCATIONS.find((l) => l.id === "loc_unassigned") || DEFAULT_LOCATIONS[0];
 const FALLBACK_TYPE = MATERIAL_TYPES.find((m) => m.id === "mat_unassigned") || MATERIAL_TYPES[0];
@@ -68,6 +68,48 @@ export function TypeSelect({ value, lang, onChange }) {
   );
 }
 
+function optionList(options, current) {
+  const nums = options.map(String);
+  const cur = current != null && String(current).trim() !== "" ? String(current).trim() : "";
+  if (cur && !nums.includes(cur)) nums.unshift(cur);
+  return nums;
+}
+
+export function WidthSelect({ value, options, lang, onChange, className = "" }) {
+  if (!options?.length) return null;
+  const rtl = lang === "ar";
+  const opts = optionList(options, value).sort((a, b) => Number(b) - Number(a));
+  return (
+    <div className={`relative inline-block w-full min-w-[4.5rem] ${className}`}>
+      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}
+        className={`w-full appearance-none text-xs font-semibold ${rtl ? "pr-6 pl-2" : "pl-6 pr-2"} py-1.5 rounded border border-[#2f3b2f]/15 bg-white cursor-pointer outline-none focus:border-[#4a6b52]`}>
+        {!value && <option value="">{lang === "ar" ? "العرض" : "Width"}</option>}
+        {opts.map((w) => <option key={w} value={w}>{w}</option>)}
+      </select>
+      <ChevronDown size={10} className={`absolute ${rtl ? "right-1.5" : "left-1.5"} top-1/2 -translate-y-1/2 pointer-events-none text-[#5c6b57]`} />
+    </div>
+  );
+}
+
+export function MetersCodeSelect({ value, options, lang, onChange, className = "" }) {
+  if (!options?.length) return null;
+  const rtl = lang === "ar";
+  const normalized = normalizeMeterRef(value);
+  const opts = optionList(options, normalized || value).sort((a, b) => Number(b) - Number(a));
+  const selected = opts.find((c) => normalizeMeterRef(c) === normalized || c === value) ?? normalized ?? value ?? "";
+
+  return (
+    <div className={`relative inline-block w-full min-w-[4rem] ${className}`}>
+      <select value={selected} onChange={(e) => onChange(e.target.value)}
+        className={`w-full appearance-none text-xs font-semibold ${rtl ? "pr-6 pl-2" : "pl-6 pr-2"} py-1.5 rounded border border-[#2f3b2f]/15 bg-white cursor-pointer outline-none focus:border-[#4a6b52]`}>
+        {!selected && <option value="">{lang === "ar" ? "متر" : "Meters"}</option>}
+        {opts.map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <ChevronDown size={10} className={`absolute ${rtl ? "right-1.5" : "left-1.5"} top-1/2 -translate-y-1/2 pointer-events-none text-[#5c6b57]`} />
+    </div>
+  );
+}
+
 export function StatCard({ label, value, accent, onClick, hint }) {
   return (
     <div onClick={onClick} className={`bg-[#fbfaf5] rounded-lg border border-[#2f3b2f]/10 px-5 py-4 ${onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}>
@@ -79,7 +121,7 @@ export function StatCard({ label, value, accent, onClick, hint }) {
 }
 
 /** Keeps local edit state while focused so parent re-renders do not steal focus. */
-export function SheetCellInput({ value, onCommit, type = "text", className }) {
+export function SheetCellInput({ value, onCommit, type = "text", className, placeholder }) {
   const external = value ?? (type === "number" ? 0 : "");
   const [local, setLocal] = useState(external);
   const focused = useRef(false);
@@ -101,6 +143,7 @@ export function SheetCellInput({ value, onCommit, type = "text", className }) {
     <input
       type={type}
       value={local}
+      placeholder={placeholder}
       onFocus={() => { focused.current = true; }}
       onBlur={() => {
         focused.current = false;

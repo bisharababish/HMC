@@ -5,11 +5,13 @@ import {
 import { nameOf } from "../i18n/strings.js";
 import { MATERIAL_TYPES } from "../constants/index.js";
 import { LocationBadge, TypeBadge } from "./ui.jsx";
+import ModuleSwitcher from "./ModuleSwitcher.jsx";
 
 export default function Shell({
   t, lang, setLang, title, subtitle, saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat, addCategory, undo, toast, dir,
   globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, openDetail,
   globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, loadError, children,
+  activeModule, setActiveModule,
 }) {
   return (
     <div dir={dir} className="min-h-screen bg-[#f4f2ec] text-[#2f3b2f]" style={{ fontFamily: "Tahoma, 'Segoe UI', Arial, sans-serif" }}>
@@ -109,6 +111,9 @@ export default function Shell({
       </header>
 
       <div className="max-w-6xl mx-auto px-6 pt-5">
+        {activeModule != null && setActiveModule && (
+          <ModuleSwitcher active={activeModule} onChange={setActiveModule} t={t} />
+        )}
         <div className="flex items-center gap-2 flex-wrap mb-5">
           <button onClick={() => setActiveCat("__dashboard__")}
             className={`px-4 py-2 rounded-t-md text-sm font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${activeCat === "__dashboard__" ? "bg-[#fbfaf5] border-[#8a5a2e] text-[#2f3b2f]" : "bg-transparent border-transparent text-[#5c6b57] hover:text-[#2f3b2f]"}`}>
