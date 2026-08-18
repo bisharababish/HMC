@@ -21,11 +21,12 @@ import OverflowMenu from "./components/OverflowMenu.jsx";
 import { fetchBackupHistory, loadBackupSnapshot, wasLastSaveCloud, clearAllBackups, createBackupSnapshot } from "./lib/db.js";
 import { isSupabaseEnabled } from "./lib/supabase.js";
 import { Panel, StatCard, LocationBadge, LocationSelect, SheetCellInput, WidthSelect, MetersCodeSelect } from "./components/ui.jsx";
-export default function InventoryApp() {
+export default function InventoryApp({ auth, lang, setLang }) {
+  const { profile, isAdmin, workbookAccess, logout } = auth;
+  const isUserMode = !isAdmin;
   const [categories, setCategories] = useState([]);
   const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
   const [checkoutLog, setCheckoutLog] = useState([]);
-  const [lang, setLang] = useState("en");
   const [activeCat, setActiveCat] = useState("__dashboard__");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -63,6 +64,9 @@ export default function InventoryApp() {
   const dir = lang === "ar" ? "rtl" : "ltr";
   const activeModuleMeta = modules.find((m) => m.id === activeModuleId);
   const isStorageModule = activeModuleMeta?.type === "storages";
+  const visibleModules = isAdmin
+    ? modules
+    : modules.filter((m) => m.type === "labeling" && m.userAccessEnabled && workbookAccess.includes(m.id));
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -108,7 +112,7 @@ export default function InventoryApp() {
 
   const handleModuleSave = useCallback((payload) => {
     if (payload.kind === "add") {
-      const mod = createModule(payload.type, payload.nameEn, payload.nameAr, payload.color);
+      const mod = { ...createModule(payload.type, payload.nameEn, payload.nameAr, payload.color), userAccessEnabled: payload.type === "labeling" ? !!payload.userAccessEnabled : false };
       const empty = createEmptyModuleData(mod.type);
       setModules((prev) => [...prev, mod]);
       setModuleData((prev) => ({ ...prev, [mod.id]: empty }));
@@ -130,7 +134,12 @@ export default function InventoryApp() {
     }
     setModules((prev) => prev.map((m) => (
       m.id === payload.moduleId
-        ? { ...m, name: { en: payload.nameEn.trim() || m.name.en, ar: payload.nameAr.trim() || m.name.ar }, color: payload.color }
+        ? {
+          ...m,
+          name: { en: payload.nameEn.trim() || m.name.en, ar: payload.nameAr.trim() || m.name.ar },
+          color: payload.color,
+          userAccessEnabled: m.type === "labeling" ? !!payload.userAccessEnabled : false,
+        }
         : m
     )));
     showToast(t.toastModuleUpdated);
@@ -192,6 +201,23 @@ export default function InventoryApp() {
   useEffect(() => {
     if (loaded && locations.length === 0) setLocations(DEFAULT_LOCATIONS);
   }, [loaded, locations.length]);
+
+  useEffect(() => {
+    if (!loaded || isAdmin) return;
+    if (visibleModules.length === 0) return;
+    if (!visibleModules.some((m) => m.id === activeModuleId)) {
+      switchModule(visibleModules[0].id);
+    }
+  }, [loaded, isAdmin, visibleModules, activeModuleId, switchModule]);
+
+  useEffect(() => {
+    if (!loaded || isAdmin || isStorageModule) return;
+    if (categories.length === 0) return;
+    const onValidSheet = categories.some((c) => c.id === activeCat);
+    if (activeCat === "__dashboard__" || !onValidSheet) {
+      setActiveCat(categories[0].id);
+    }
+  }, [loaded, isAdmin, isStorageModule, activeCat, categories]);
 
   const persist = useCallback((data) => {
     if (!isSupabaseEnabled()) return;
@@ -341,7 +367,7 @@ export default function InventoryApp() {
 
   const openDetail = (catId, rowId) => setModal({ kind: "itemDetail", catId, rowId });
 
-  const takeOutStock = (catId, rowId, amount, note) => {
+  const takeOutStock = (catId, rowId, amount, note, takenBy) => {
     const c = categories.find((cc) => cc.id === catId);
     const r = c?.rows.find((rr) => rr.id === rowId);
     if (!c || !r) return;
@@ -353,7 +379,11 @@ export default function InventoryApp() {
       rows: cc.rows.map((rr) => rr.id === rowId ? { ...rr, values: { ...rr.values, qty: remaining, lastUpdated: Date.now() } } : rr),
     }));
     setCheckoutLog((prev) => [
-      { id: rid(), ts: Date.now(), catId, catName: nameOf(c.name, lang), rowId, desc: r.values.desc, ref: r.values.ref, qtyTaken: take, remainingQty: remaining, note: note || "" },
+      {
+        id: rid(), ts: Date.now(), catId, catName: nameOf(c.name, lang), rowId,
+        desc: r.values.desc, ref: r.values.ref, qtyTaken: take, remainingQty: remaining,
+        note: note || "", takenBy: takenBy || profile?.display_name || profile?.email || "",
+      },
       ...prev,
     ].slice(0, MAX_LOG));
     showToast(`${t.toastTakenOut}: ${take}`);
@@ -462,28 +492,35 @@ export default function InventoryApp() {
     showToast(t.toastActivityCleared);
   };
 
-  const moduleSwitcherProps = {
-    modules,
+  const moduleSwitcherProps = visibleModules.length > 0 ? {
+    modules: visibleModules,
     activeModuleId,
     onChange: switchModule,
-    onAdd: () => setModuleModal({ kind: "addModule" }),
-    onEdit: (moduleId) => setModuleModal({ kind: "editModule", module: modules.find((m) => m.id === moduleId) }),
+    onAdd: isAdmin ? () => setModuleModal({ kind: "addModule" }) : null,
+    onEdit: isAdmin ? (moduleId) => setModuleModal({ kind: "editModule", module: modules.find((m) => m.id === moduleId) }) : null,
     lang,
     t,
-  };
+  } : null;
 
   const shellProps = {
     t, lang, setLang,
     title: activeModuleMeta ? nameOf(activeModuleMeta.name, lang) : t.appTitle,
-    subtitle: t.appSubtitle,
+    subtitle: isUserMode ? t.userModeHint : t.appSubtitle,
     saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat,
-    addCategory: () => setModal({ kind: "addSheet" }), undo, toast, dir,
-    globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, jumpToResult, openDetail,
+    addCategory: isAdmin ? () => setModal({ kind: "addSheet" }) : null,
+    undo: isAdmin ? undo : null,
+    toast, dir,
+    globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, openDetail,
     helpOpen, setHelpOpen, loadError,
     moduleSwitcherProps,
+    isUserMode,
+    profile,
+    logout,
+    showDashboardTab: !isUserMode,
   };
 
   if (isStorageModule) {
+    if (isUserMode) return null;
     return (
       <>
         <StorageModule
@@ -500,7 +537,7 @@ export default function InventoryApp() {
           moduleTitle={activeModuleMeta ? nameOf(activeModuleMeta.name, lang) : t.storageTitle}
           moduleSwitcherProps={moduleSwitcherProps}
         />
-        <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} />
+        <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} showToast={showToast} isAdmin={isAdmin} />
         {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-white text-sm px-4 py-2 rounded-full shadow-lg z-50" style={{ backgroundColor: "#2f3b2f" }}>{toast}</div>}
       </>
     );
@@ -510,10 +547,11 @@ export default function InventoryApp() {
     modal, setModal, t, lang, categories, locations, checkoutLog, setLocations, withHistory, setActiveCat, showToast,
     deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult, locOf,
     deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity, deleteLocationNow,
+    isUserMode, isAdmin,
   };
 
   // ============================= Dashboard =============================
-  if (isDashboard) {
+  if (isDashboard && !isUserMode) {
     const grand = categories.reduce((s, c) => s + c.rows.reduce((rs, r) => rs + (Number(r.values.qty) || 0), 0), 0);
     const lowStockItems = [];
     categories.forEach((c) => c.rows.forEach((r) => {
@@ -657,6 +695,7 @@ export default function InventoryApp() {
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "الكمية المسحوبة" : "Taken"}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.remainingLabel}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "ملاحظة" : "Note"}</th>
+                  <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.takenByColumn}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.lastUpdated}</th>
                   <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.actions}</th>
                 </tr>
@@ -669,6 +708,7 @@ export default function InventoryApp() {
                     <td className="px-4 py-2 font-bold text-[#b23b3b]">-{entry.qtyTaken}</td>
                     <td className="px-4 py-2">{entry.remainingQty}</td>
                     <td className="px-4 py-2 text-[#5c6b57] max-w-[120px] truncate">{entry.note || ""}</td>
+                    <td className="px-4 py-2 text-[#5c6b57]">{entry.takenBy || "—"}</td>
                     <td className="px-4 py-2 text-xs text-[#5c6b57]"><span className="flex items-center gap-1"><Clock size={11} /> {timeAgo(entry.ts, t)}</span></td>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
@@ -766,6 +806,28 @@ export default function InventoryApp() {
         </Panel>
 
         <ModalHost {...modalHostProps} />
+        {isAdmin && (
+          <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} showToast={showToast} isAdmin={isAdmin} />
+        )}
+      </Shell>
+    );
+  }
+
+  // Staff users skip dashboard — wait until a sheet tab is selected
+  if (!current) {
+    return (
+      <Shell {...shellProps}>
+        <div className="flex items-center justify-center py-20 text-[#5c6b57]">
+          {categories.length === 0 ? (
+            <p className="text-sm">{lang === "ar" ? "لا توجد صفحات في هذا الدفتر بعد." : "No sheets in this workbook yet."}</p>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Loader2 className="animate-spin" size={20} />
+              <span>{t.loading}</span>
+            </div>
+          )}
+        </div>
+        <ModalHost {...modalHostProps} />
       </Shell>
     );
   }
@@ -798,9 +860,13 @@ export default function InventoryApp() {
   return (
     <Shell {...shellProps}>
       <div className="grid sm:grid-cols-3 gap-4 mb-5">
-        <StatCard label={t.totalUnits} value={total} accent="#8a5a2e" />
-        <StatCard label={t.itemCount} value={current.rows.length} accent="#4a6b52" />
-        <StatCard label={t.lowStock} value={lowCount} accent={lowCount ? "#b23b3b" : "#4a6b52"} />
+        {!isUserMode && (
+          <>
+            <StatCard label={t.totalUnits} value={total} accent="#8a5a2e" />
+            <StatCard label={t.itemCount} value={current.rows.length} accent="#4a6b52" />
+            <StatCard label={t.lowStock} value={lowCount} accent={lowCount ? "#b23b3b" : "#4a6b52"} />
+          </>
+        )}
       </div>
 
       <div className="bg-[#fbfaf5] rounded-lg shadow-sm border border-[#2f3b2f]/10 overflow-hidden mb-8">
@@ -817,13 +883,17 @@ export default function InventoryApp() {
               <option value="all">{t.allLocations}</option>
               {locations.map((l) => <option key={l.id} value={l.id}>{nameOf(l.name, lang)}</option>)}
             </select>
-            <button onClick={() => addRow(current.id)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded font-semibold" style={{ backgroundColor: "#8a5a2e", color: "#ffffff" }}>
-              <PlusCircle size={14} /> {t.newItem}
-            </button>
-            <OverflowMenu t={t} lang={lang}
-              onExport={() => downloadText(`${nameOf(current.name, lang)}.csv`, toCSV(current, locations, lang))}
-              onAddColumn={() => setModal({ kind: "addColumn", catId: current.id })}
-              onDeleteSheet={categories.length > 1 ? () => setModal({ kind: "confirmDeleteSheet", catId: current.id }) : null} />
+            {!isUserMode && (
+              <>
+                <button onClick={() => addRow(current.id)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded font-semibold" style={{ backgroundColor: "#8a5a2e", color: "#ffffff" }}>
+                  <PlusCircle size={14} /> {t.newItem}
+                </button>
+                <OverflowMenu t={t} lang={lang}
+                  onExport={() => downloadText(`${nameOf(current.name, lang)}.csv`, toCSV(current, locations, lang))}
+                  onAddColumn={() => setModal({ kind: "addColumn", catId: current.id })}
+                  onDeleteSheet={categories.length > 1 ? () => setModal({ kind: "confirmDeleteSheet", catId: current.id }) : null} />
+              </>
+            )}
           </div>
         </div>
 
@@ -840,7 +910,7 @@ export default function InventoryApp() {
                         <span>{col.key === "desc" && isFinishWidthSheet(current) ? (lang === "ar" ? "النوع" : "Finish") : nameOf(col.label, lang)}</span>
                         <ArrowUpDown size={11} className={sortKey === col.key ? "opacity-100" : "opacity-30"} />
                       </button>
-                      {col.key !== "qty" && col.key !== "desc" && (
+                      {col.key !== "qty" && col.key !== "desc" && !isUserMode && (
                         <button onClick={() => deleteColumn(current.id, col.key)} className="opacity-40 hover:opacity-100 hover:text-red-600"><Trash2 size={12} /></button>
                       )}
                     </div>
@@ -863,10 +933,16 @@ export default function InventoryApp() {
                   <tr id={`row-${r.id}`} key={r.id}
                       className={`border-t border-[#2f3b2f]/10 transition-colors duration-700 ${isFlashed ? "row-flash" : meterRowClass(severity) || "hover:bg-[#f4f2ec]/60"}`}>
                     <td className="px-3 py-2 text-[#8a5a2e] font-semibold">{(safePage - 1) * pageSize + i + 1}</td>
-                    <td className="px-3 py-1.5"><LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(current.id, r.id, "location", v)} /></td>
+                    <td className="px-3 py-1.5">
+                      {isUserMode ? <LocationBadge loc={locOf(r.values.location)} lang={lang} /> : (
+                        <LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(current.id, r.id, "location", v)} />
+                      )}
+                    </td>
                     {current.columns.map((col) => (
                       <td key={col.key} className="px-3 py-1.5">
-                        {col.key === "qty" ? (
+                        {isUserMode ? (
+                          <span className="block px-2 py-1 text-sm">{col.key === "qty" ? (r.values.qty ?? 0) : (r.values[col.key] ?? "—")}</span>
+                        ) : col.key === "qty" ? (
                           <div className="flex items-center gap-1.5 justify-center">
                             <button onClick={() => bumpQty(current.id, r.id, -1)} title={lang === "ar" ? "سحب وحدة" : "Remove one unit"} className="w-6 h-6 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={12} /></button>
                             <SheetCellInput type="number" value={r.values.qty ?? 0} onCommit={(v) => changeCell(current.id, r.id, "qty", v)}
@@ -901,8 +977,18 @@ export default function InventoryApp() {
                     ))}
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2 justify-center">
-                        <button onClick={() => openDetail(current.id, r.id)} title={t.viewDetails} className="text-[#5c6b57] hover:text-[#1f6f8b]"><Eye size={15} /></button>
-                        <button onClick={() => setModal({ kind: "confirmDeleteRow", catId: current.id, rowId: r.id })} title={t.delete} className="text-[#5c6b57] hover:text-red-600"><Trash2 size={14} /></button>
+                        {isUserMode ? (
+                          <button onClick={() => openDetail(current.id, r.id)} disabled={(Number(r.values.qty) || 0) <= 0} title={t.takeOutTitle}
+                            className="text-xs flex items-center gap-1 px-2 py-1 rounded font-semibold text-white disabled:opacity-40"
+                            style={{ backgroundColor: "#6b4fa0" }}>
+                            <PackageMinus size={14} />
+                          </button>
+                        ) : (
+                          <>
+                            <button onClick={() => openDetail(current.id, r.id)} title={t.viewDetails} className="text-[#5c6b57] hover:text-[#1f6f8b]"><Eye size={15} /></button>
+                            <button onClick={() => setModal({ kind: "confirmDeleteRow", catId: current.id, rowId: r.id })} title={t.delete} className="text-[#5c6b57] hover:text-red-600"><Trash2 size={14} /></button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -924,7 +1010,9 @@ export default function InventoryApp() {
       </div>
 
       <ModalHost {...modalHostProps} />
-      <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} />
+      {isAdmin && (
+        <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} showToast={showToast} isAdmin={isAdmin} />
+      )}
     </Shell>
   );
 }

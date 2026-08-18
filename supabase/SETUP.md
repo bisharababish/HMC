@@ -47,15 +47,25 @@ Then restart: `npm run dev`
 - **Project Settings** (gear) → **API**
 - Copy **Project URL** and **anon public** key into `.env`
 
-### 5. Restart app
+### 5. Set up login (email + password only — no verification)
+- Authentication → **Providers** → **Email** → ON
+- Authentication → **Settings** → turn **OFF** “Confirm email” (recommended)
+- SQL Editor → run [`auth.sql`](auth.sql) → **Run**
+- SQL Editor → run [`seed-users.sql`](seed-users.sql) → **Run**
+
+Default accounts (created by seed-users.sql):
+
+| Role | Email | Password |
+|------|-------|----------|
+| **Admin** (full access) | `admin@gmail.com` | `admin2026` |
+| **Labeling staff** (take-out only) | `labeling@gmail.com` | `labeling2026` |
+
+No verification email — sign in and go.
+
+### 6. Restart app
 ```bash
 npm run dev
 ```
-- Make a small change in the app
-- Header should show **Cloud saved**
-- Dashboard → **Backup History** appears
-
----
 
 ## What the database stores
 
@@ -85,4 +95,5 @@ You can also browse data in Supabase → **Table Editor** → `app_state` / `cha
 |---------|-----|
 | Still says **Local only** | `.env` missing or wrong; restart `npm run dev` after creating `.env` |
 | Cloud save fails | Re-run `schema.sql`; check browser console (F12) |
-| Empty after connect | Normal on first run — edit something to create first backup |
+| Login says email not confirmed | Re-run [`auth.sql`](auth.sql) in SQL Editor (confirms all users) |
+| Invalid email or password | Check email/password; owner creates accounts in Supabase → Users |

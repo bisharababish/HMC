@@ -3,7 +3,7 @@ import { X, Tag, Minus, Plus, PackageMinus, Clock } from "lucide-react";
 import { nameOf, timeAgo } from "../i18n/strings.js";
 import { mkCat, parseWidth, normalizeMeterRef, rowTotalMeters, rowMeterSeverity } from "../utils/index.js";
 import { isFinishWidthSheet } from "../constants/index.js";
-import { LocationSelect } from "./ui.jsx";
+import { LocationSelect, LocationBadge } from "./ui.jsx";
 
 function modalKeyOf(modal) {
   if (!modal) return "";
@@ -53,13 +53,15 @@ function ModalButtons({ onClose, onConfirm, confirmLabel, danger, disabled, canc
 
 export default function ModalHost({ modal, setModal, t, lang, categories, locations, checkoutLog, setLocations, withHistory, setActiveCat, showToast,
   deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult,
-  deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity, deleteLocationNow }) {
+  deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity, deleteLocationNow,
+  isUserMode = false, isAdmin = true }) {
   const [f1, setF1] = useState("");
   const [f2, setF2] = useState("");
   const [colType, setColType] = useState("text");
   const [numVal, setNumVal] = useState(0);
   const [takeAmt, setTakeAmt] = useState(1);
   const [takeNote, setTakeNote] = useState("");
+  const [takenByName, setTakenByName] = useState("");
   const [restoreStock, setRestoreStock] = useState(true);
   const [locColor, setLocColor] = useState("#2e7d46");
   const firstInputRef = useRef(null);
@@ -71,6 +73,7 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
     setF2("");
     setColType("text");
     setTakeNote("");
+    setTakenByName("");
     setRestoreStock(true);
     setLocColor("#2e7d46");
     if (modal.kind === "threshold") setNumVal(modal.value ?? 5);
@@ -330,16 +333,25 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
           )}
         </div>
 
-        <div className="mb-4">
-          <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.location}</label>
-          <LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(c.id, r.id, "location", v)} full />
-        </div>
+        {!isUserMode && (
+          <div className="mb-4">
+            <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.location}</label>
+            <LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(c.id, r.id, "location", v)} full />
+          </div>
+        )}
+
+        {isUserMode && (
+          <div className="mb-4">
+            <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.location}</label>
+            <LocationBadge loc={locations.find((l) => l.id === r.values.location)} lang={lang} />
+          </div>
+        )}
 
         <div className={`rounded-lg border p-3 mb-4 flex items-center justify-between ${meterSev === "low" || meterSev === "out" ? "border-red-200 bg-red-50" : meterSev === "critical" ? "border-amber-300 bg-amber-50" : "border-[#2f3b2f]/10 bg-[#f4f2ec]"}`}>
           <div>
             <div className="text-xs text-[#5c6b57]">{t.availableQty}</div>
             <div className={`text-2xl font-bold ${meterSev ? "text-red-700" : "text-[#2f3b2f]"}`}>{qty}</div>
-            {r.values.ref && !finishWidth && (
+            {r.values.ref && !finishWidth && !isUserMode && (
               <div className={`text-sm mt-1 font-semibold ${meterSev === "critical" ? "text-amber-800" : meterSev ? "text-red-700" : "text-[#5c6b57]"}`}>
                 {lang === "ar" ? "إجمالي الأمتار" : "Total meters"}: {totalMeters.toLocaleString()}
               </div>
@@ -350,38 +362,66 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
-            <button type="button" onClick={() => bumpQty(c.id, r.id, -1)} className="w-8 h-8 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={14} /></button>
-            <button type="button" onClick={() => bumpQty(c.id, r.id, 1)} className="w-8 h-8 flex items-center justify-center rounded bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"><Plus size={14} /></button>
-          </div>
+          {!isUserMode && (
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={() => bumpQty(c.id, r.id, -1)} className="w-8 h-8 flex items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"><Minus size={14} /></button>
+              <button type="button" onClick={() => bumpQty(c.id, r.id, 1)} className="w-8 h-8 flex items-center justify-center rounded bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"><Plus size={14} /></button>
+            </div>
+          )}
         </div>
 
-        <div className="text-xs text-[#5c6b57] mb-4 flex items-center gap-1"><Clock size={11} /> {t.lastUpdated}: {timeAgo(r.values.lastUpdated, t)}</div>
+        {!isUserMode && (
+          <div className="text-xs text-[#5c6b57] mb-4 flex items-center gap-1"><Clock size={11} /> {t.lastUpdated}: {timeAgo(r.values.lastUpdated, t)}</div>
+        )}
 
         <div className="rounded-lg border border-[#2f3b2f]/10 p-4 mb-2">
           <div className="font-bold text-sm mb-3 flex items-center gap-1.5"><PackageMinus size={15} className="text-[#6b4fa0]" /> {t.takeOutTitle}</div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className={`grid gap-3 mb-3 ${isUserMode ? "grid-cols-1" : "grid-cols-2"}`}>
             <div>
               <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.quantityToTake}</label>
               <input type="number" min={1} max={Math.max(1, qty)} value={clampedTake} onChange={(e) => setTakeAmt(Number(e.target.value))}
                 className="w-full px-3 py-2 rounded border border-[#2f3b2f]/20 bg-white text-sm outline-none focus:border-[#4a6b52]" />
             </div>
-            <div>
-              <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.optionalNote}</label>
-              <input value={takeNote} onChange={(e) => setTakeNote(e.target.value)}
+            {isUserMode ? (
+              <div>
+                <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.takenByLabel} *</label>
+                <input ref={firstInputRef} value={takenByName} onChange={(e) => setTakenByName(e.target.value)}
+                  className="w-full px-3 py-2 rounded border border-[#2f3b2f]/20 bg-white text-sm outline-none focus:border-[#4a6b52]" />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.optionalNote}</label>
+                <input value={takeNote} onChange={(e) => setTakeNote(e.target.value)}
+                  className="w-full px-3 py-2 rounded border border-[#2f3b2f]/20 bg-white text-sm outline-none focus:border-[#4a6b52]" />
+              </div>
+            )}
+          </div>
+          {!isUserMode && (
+            <div className="mb-3">
+              <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.takenByLabel}</label>
+              <input value={takenByName} onChange={(e) => setTakenByName(e.target.value)}
                 className="w-full px-3 py-2 rounded border border-[#2f3b2f]/20 bg-white text-sm outline-none focus:border-[#4a6b52]" />
             </div>
-          </div>
-          <button type="button" disabled={qty <= 0} onClick={() => { takeOutStock(c.id, r.id, clampedTake, takeNote); close(); }}
+          )}
+          <button type="button" disabled={qty <= 0} onClick={() => {
+            if (isUserMode && !takenByName.trim()) {
+              showToast(t.takenByRequired);
+              return;
+            }
+            takeOutStock(c.id, r.id, clampedTake, takeNote, takenByName.trim());
+            close();
+          }}
             className="w-full py-2 rounded text-sm font-semibold flex items-center justify-center gap-1.5"
             style={{ backgroundColor: qty <= 0 ? "#c9c9c9" : "#6b4fa0", color: "#ffffff", opacity: qty <= 0 ? 0.6 : 1, cursor: qty <= 0 ? "not-allowed" : "pointer" }}>
             <PackageMinus size={15} /> {t.confirmTakeout}
           </button>
         </div>
 
-        <button type="button" onClick={() => { jumpToResult(c.id, r.id); }} className="w-full mt-1 py-2 rounded border border-[#2f3b2f]/20 text-sm hover:bg-[#f4f2ec]">
-          {t.goToItem}
-        </button>
+        {!isUserMode && (
+          <button type="button" onClick={() => { jumpToResult(c.id, r.id); }} className="w-full mt-1 py-2 rounded border border-[#2f3b2f]/20 text-sm hover:bg-[#f4f2ec]">
+            {t.goToItem}
+          </button>
+        )}
       </ModalWrap>
     );
   }

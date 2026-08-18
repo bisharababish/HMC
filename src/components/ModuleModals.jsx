@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { X } from "lucide-react";
+import { fetchWorkbookUsers } from "../lib/auth.js";
+import WorkbookUsersPanel from "./WorkbookUsersPanel.jsx";
 
-function ModalWrap({ title, children, onClose }) {
+function ModalWrap({ title, children, onClose, wide }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-xl shadow-xl w-full max-w-md border border-[#2f3b2f]/10 overflow-hidden bg-[#fbfaf5]">
-        <div className="px-5 py-3.5 border-b border-[#2f3b2f]/10 flex items-center justify-between bg-[#f4f2ec]">
+      <div onClick={(e) => e.stopPropagation()} className={`rounded-xl shadow-xl w-full ${wide ? "max-w-lg" : "max-w-md"} border border-[#2f3b2f]/10 overflow-hidden bg-[#fbfaf5] max-h-[90vh] overflow-y-auto`}>
+        <div className="px-5 py-3.5 border-b border-[#2f3b2f]/10 flex items-center justify-between bg-[#f4f2ec] sticky top-0 z-10">
           <h3 className="font-bold">{title}</h3>
           <button type="button" onClick={onClose}><X size={16} /></button>
         </div>
@@ -15,12 +17,22 @@ function ModalWrap({ title, children, onClose }) {
   );
 }
 
-export default function ModuleModals({ modal, setModal, t, onSave, onDelete }) {
+export default function ModuleModals({ modal, setModal, t, onSave, onDelete, showToast, isAdmin }) {
   const [nameEn, setNameEn] = useState("");
   const [nameAr, setNameAr] = useState("");
   const [color, setColor] = useState("#8a5a2e");
   const [moduleType, setModuleType] = useState("labeling");
+  const [userAccessEnabled, setUserAccessEnabled] = useState(false);
+  const [workbookUsers, setWorkbookUsers] = useState([]);
   const firstRef = useRef(null);
+
+  const loadUsers = async (moduleId) => {
+    try {
+      setWorkbookUsers(await fetchWorkbookUsers(moduleId));
+    } catch {
+      setWorkbookUsers([]);
+    }
+  };
 
   useEffect(() => {
     if (!modal) return;
@@ -29,14 +41,18 @@ export default function ModuleModals({ modal, setModal, t, onSave, onDelete }) {
       setNameAr("");
       setColor("#8a5a2e");
       setModuleType("labeling");
+      setUserAccessEnabled(false);
+      setWorkbookUsers([]);
     }
     if (modal.kind === "editModule" && modal.module) {
       setNameEn(modal.module.name?.en || "");
       setNameAr(modal.module.name?.ar || "");
       setColor(modal.module.color || "#8a5a2e");
+      setUserAccessEnabled(!!modal.module.userAccessEnabled);
+      if (modal.module.type === "labeling" && isAdmin) loadUsers(modal.module.id);
     }
     firstRef.current?.focus();
-  }, [modal]);
+  }, [modal, isAdmin]);
 
   if (!modal) return null;
 
@@ -54,8 +70,9 @@ export default function ModuleModals({ modal, setModal, t, onSave, onDelete }) {
 
   if (modal.kind === "addModule" || modal.kind === "editModule") {
     const isEdit = modal.kind === "editModule";
+    const isLabeling = isEdit ? modal.module?.type === "labeling" : moduleType === "labeling";
     return (
-      <ModalWrap title={isEdit ? t.editModuleTitle : t.addModuleTitle} onClose={() => setModal(null)}>
+      <ModalWrap title={isEdit ? t.editModuleTitle : t.addModuleTitle} onClose={() => setModal(null)} wide={isEdit && isLabeling && isAdmin}>
         {!isEdit && (
           <div className="mb-3">
             <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.moduleTypeLabel}</label>
@@ -77,7 +94,31 @@ export default function ModuleModals({ modal, setModal, t, onSave, onDelete }) {
         <input value={nameAr} onChange={(e) => setNameAr(e.target.value)} className="w-full mb-3 px-3 py-2 rounded border border-[#2f3b2f]/20 text-sm" dir="rtl" />
         <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.moduleColor}</label>
         <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-full h-10 mb-4 rounded border border-[#2f3b2f]/20" />
-        <div className="flex gap-2 justify-between flex-wrap">
+
+        {isAdmin && isLabeling && (
+          <div className="mb-4 p-3 rounded-lg border border-[#2f3b2f]/10 bg-[#f4f2ec]">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" checked={userAccessEnabled} onChange={(e) => setUserAccessEnabled(e.target.checked)} className="mt-1" />
+              <span>
+                <span className="text-sm font-semibold block">{t.userAccessEnabled}</span>
+                <span className="text-xs text-[#5c6b57]">{t.userAccessEnabledHint}</span>
+              </span>
+            </label>
+          </div>
+        )}
+
+        {isAdmin && isEdit && isLabeling && userAccessEnabled && modal.module && (
+          <WorkbookUsersPanel
+            t={t}
+            lang="en"
+            moduleId={modal.module.id}
+            users={workbookUsers}
+            onRefresh={() => loadUsers(modal.module.id)}
+            showToast={showToast}
+          />
+        )}
+
+        <div className="flex gap-2 justify-between flex-wrap mt-4">
           <div>
             {isEdit && (
               <button type="button" onClick={() => setModal({ kind: "confirmDeleteModule", moduleId: modal.module.id })} className="px-3 py-1.5 text-sm text-red-600 hover:underline">{t.deleteModule}</button>
@@ -85,7 +126,12 @@ export default function ModuleModals({ modal, setModal, t, onSave, onDelete }) {
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={() => setModal(null)} className="px-4 py-2 rounded border text-sm">{t.cancel}</button>
-            <button type="button" onClick={() => { onSave(isEdit ? { kind: "edit", moduleId: modal.module.id, nameEn, nameAr, color } : { kind: "add", type: moduleType, nameEn, nameAr, color }); setModal(null); }}
+            <button type="button" onClick={() => {
+              onSave(isEdit
+                ? { kind: "edit", moduleId: modal.module.id, nameEn, nameAr, color, userAccessEnabled: isLabeling ? userAccessEnabled : false }
+                : { kind: "add", type: moduleType, nameEn, nameAr, color, userAccessEnabled: moduleType === "labeling" ? userAccessEnabled : false });
+              setModal(null);
+            }}
               className="px-4 py-2 rounded text-white text-sm font-semibold" style={{ backgroundColor: color }}>
               {isEdit ? t.save : t.add}
             </button>

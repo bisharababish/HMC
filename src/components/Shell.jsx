@@ -11,6 +11,7 @@ export default function Shell({
   globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, openDetail,
   helpOpen, setHelpOpen, loadError, children,
   moduleSwitcherProps,
+  isUserMode = false, profile, logout, showDashboardTab = true,
 }) {
   return (
     <div dir={dir} className="min-h-screen bg-[#f4f2ec] text-[#2f3b2f]" style={{ fontFamily: "Tahoma, 'Segoe UI', Arial, sans-serif" }}>
@@ -68,13 +69,21 @@ export default function Shell({
           </div>
 
           <div className="flex items-center gap-2">
+            {profile && (
+              <span className="text-xs text-[#5c6b57] hidden sm:inline">{t.loggedInAs} {profile.email}</span>
+            )}
             <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border border-[#2f3b2f]/20 hover:bg-[#f4f2ec]">
               <Languages size={14} /> {t.langToggle}
             </button>
             <button onClick={() => setHelpOpen(true)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border border-[#2f3b2f]/20 hover:bg-[#f4f2ec]">
               <HelpCircle size={14} /> {t.help}
             </button>
-            <button onClick={undo} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border border-[#2f3b2f]/20 hover:bg-[#f4f2ec]"><Undo2 size={14} /> {t.undo}</button>
+            {undo && (
+              <button onClick={undo} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border border-[#2f3b2f]/20 hover:bg-[#f4f2ec]"><Undo2 size={14} /> {t.undo}</button>
+            )}
+            {logout && (
+              <button onClick={logout} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded border border-[#2f3b2f]/20 hover:bg-[#f4f2ec] text-red-700">{t.logout}</button>
+            )}
             <div className="text-xs text-[#5c6b57] flex flex-col items-end gap-0.5 whitespace-nowrap">
               <span className="flex items-center gap-1">
                 {saving ? (
@@ -100,19 +109,23 @@ export default function Shell({
           <ModuleSwitcher {...moduleSwitcherProps} />
         )}
         <div className="flex items-center gap-2 flex-wrap mb-5">
-          <button onClick={() => setActiveCat("__dashboard__")}
-            className={`px-4 py-2 rounded-t-md text-sm font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${activeCat === "__dashboard__" ? "bg-[#fbfaf5] border-[#8a5a2e] text-[#2f3b2f]" : "bg-transparent border-transparent text-[#5c6b57] hover:text-[#2f3b2f]"}`}>
-            <LayoutDashboard size={15} /> {t.dashboardTab}
-          </button>
+          {showDashboardTab && (
+            <button onClick={() => setActiveCat("__dashboard__")}
+              className={`px-4 py-2 rounded-t-md text-sm font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${activeCat === "__dashboard__" ? "bg-[#fbfaf5] border-[#8a5a2e] text-[#2f3b2f]" : "bg-transparent border-transparent text-[#5c6b57] hover:text-[#2f3b2f]"}`}>
+              <LayoutDashboard size={15} /> {t.dashboardTab}
+            </button>
+          )}
           {categories.map((c) => (
             <button key={c.id} onClick={() => setActiveCat(c.id)}
               className={`px-4 py-2 rounded-t-md text-sm font-semibold border-b-2 transition-colors ${c.id === activeCat ? "bg-[#fbfaf5] border-[#8a5a2e] text-[#2f3b2f]" : "bg-transparent border-transparent text-[#5c6b57] hover:text-[#2f3b2f]"}`}>
               {nameOf(c.name, lang)}
             </button>
           ))}
-          <button onClick={addCategory} className="px-3 py-2 rounded-t-md text-sm font-semibold text-[#8a5a2e] hover:bg-[#eee9dc] flex items-center gap-1">
-            <FolderPlus size={16} /> {t.addSheet}
-          </button>
+          {addCategory && (
+            <button onClick={addCategory} className="px-3 py-2 rounded-t-md text-sm font-semibold text-[#8a5a2e] hover:bg-[#eee9dc] flex items-center gap-1">
+              <FolderPlus size={16} /> {t.addSheet}
+            </button>
+          )}
         </div>
 
         {loadError && (
@@ -136,12 +149,21 @@ export default function Shell({
               <button onClick={() => setHelpOpen(false)} style={{ color: "#2f3b2f" }}><X size={16} /></button>
             </div>
             <div className="p-5 space-y-3 text-sm" style={{ backgroundColor: "#fbfaf5", color: "#2f3b2f" }}>
-              <p className="flex gap-2"><Search size={15} className="shrink-0 mt-0.5 text-[#2e7d46]" /> {t.helpSearch}</p>
-              <p className="flex gap-2"><Plus size={15} className="shrink-0 mt-0.5 text-[#8a5a2e]" /> {t.helpQty}</p>
-              <p className="flex gap-2"><MapPin size={15} className="shrink-0 mt-0.5 text-[#1f6f8b]" /> {t.helpLocation}</p>
-              <p className="flex gap-2"><PackageMinus size={15} className="shrink-0 mt-0.5 text-[#6b4fa0]" /> {t.helpCheckout}</p>
-              <p className="flex gap-2"><AlertTriangle size={15} className="shrink-0 mt-0.5 text-[#b23b3b]" /> {t.helpLowStock}</p>
-              <p className="flex gap-2"><PlusCircle size={15} className="shrink-0 mt-0.5 text-[#6b4fa0]" /> {t.helpAdd}</p>
+              {isUserMode ? (
+                <>
+                  <p className="flex gap-2"><Search size={15} className="shrink-0 mt-0.5 text-[#2e7d46]" /> {t.helpUserCheckout}</p>
+                  <p className="flex gap-2"><PackageMinus size={15} className="shrink-0 mt-0.5 text-[#6b4fa0]" /> {t.takenByRequired}</p>
+                </>
+              ) : (
+                <>
+                  <p className="flex gap-2"><Search size={15} className="shrink-0 mt-0.5 text-[#2e7d46]" /> {t.helpSearch}</p>
+                  <p className="flex gap-2"><Plus size={15} className="shrink-0 mt-0.5 text-[#8a5a2e]" /> {t.helpQty}</p>
+                  <p className="flex gap-2"><MapPin size={15} className="shrink-0 mt-0.5 text-[#1f6f8b]" /> {t.helpLocation}</p>
+                  <p className="flex gap-2"><PackageMinus size={15} className="shrink-0 mt-0.5 text-[#6b4fa0]" /> {t.helpCheckout}</p>
+                  <p className="flex gap-2"><AlertTriangle size={15} className="shrink-0 mt-0.5 text-[#b23b3b]" /> {t.helpLowStock}</p>
+                  <p className="flex gap-2"><PlusCircle size={15} className="shrink-0 mt-0.5 text-[#6b4fa0]" /> {t.helpAdd}</p>
+                </>
+              )}
             </div>
             <div className="px-5 pb-5" style={{ backgroundColor: "#fbfaf5" }}>
               <button onClick={() => setHelpOpen(false)} className="w-full py-2 rounded text-white text-sm font-semibold" style={{ backgroundColor: "#8a5a2e" }}>{t.close}</button>

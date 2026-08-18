@@ -41,6 +41,7 @@ export function createModule(type, nameEn, nameAr, color) {
     type,
     name: { en: nameEn.trim() || (type === "storages" ? "HMC Storages" : "Labeling Storage"), ar: nameAr.trim() || nameEn.trim() || "" },
     color: color || palette,
+    userAccessEnabled: false,
   };
 }
 
@@ -71,15 +72,16 @@ export function normalizeAppState(parsed) {
 
   modules = modules.map((m, i) => {
     const def = DEFAULT_MODULES()[i] || DEFAULT_MODULES()[0];
-    return {
-      id: m.id || def.id,
-      type: m.type === "storages" ? "storages" : "labeling",
-      name: {
-        en: m.name?.en?.trim() || def.name.en,
-        ar: m.name?.ar?.trim() || def.name.ar,
-      },
-      color: m.color || def.color,
-    };
+  return {
+    id: m.id || def.id,
+    type: m.type === "storages" ? "storages" : "labeling",
+    name: {
+      en: m.name?.en?.trim() || def.name.en,
+      ar: m.name?.ar?.trim() || def.name.ar,
+    },
+    color: m.color || def.color,
+    userAccessEnabled: m.type === "storages" ? false : !!m.userAccessEnabled,
+  };
   });
 
   modules.forEach((m) => {
