@@ -128,7 +128,7 @@ export const WIDTH_BY_MATERIAL = {
   mat_paper: [1800, 1000, 950, 800],
   mat_plastic: [2050, 2000, 1500, 1000, 990, 970, 950, 940, 880, 800],
   mat_transparent: [2050, 2000, 1500, 1000, 990, 970, 950, 940, 880, 800],
-  mat_silver: [1000, 950, 800],
+  mat_silver: [2000, 1000, 950, 800],
   mat_unassigned: [],
 };
 
@@ -138,7 +138,7 @@ export const WIDTH_BY_SHEET = {
   "FSC Coated Paper": [1000, 950, 800],
   Plastic: [2050, 2000, 1500, 1000, 990, 970, 950, 940, 880, 800],
   "Clear Plastic": [2050, 2000, 1800, 1500, 1000, 990, 970, 950, 940, 800],
-  Silver: [1000, 950, 800],
+  Silver: [2000, 1000, 950, 800],
   Lamination: ["Matt", "Glossy"],
 };
 
