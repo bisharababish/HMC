@@ -3,15 +3,14 @@ import {
   LayoutDashboard, FolderPlus, Plus, PlusCircle, MapPin, AlertTriangle, PackageMinus, X,
 } from "lucide-react";
 import { nameOf } from "../i18n/strings.js";
-import { MATERIAL_TYPES } from "../constants/index.js";
-import { LocationBadge, TypeBadge } from "./ui.jsx";
+import { LocationBadge } from "./ui.jsx";
 import ModuleSwitcher from "./ModuleSwitcher.jsx";
 
 export default function Shell({
   t, lang, setLang, title, subtitle, saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat, addCategory, undo, toast, dir,
   globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, openDetail,
-  globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, loadError, children,
-  activeModule, setActiveModule,
+  helpOpen, setHelpOpen, loadError, children,
+  moduleSwitcherProps,
 }) {
   return (
     <div dir={dir} className="min-h-screen bg-[#f4f2ec] text-[#2f3b2f]" style={{ fontFamily: "Tahoma, 'Segoe UI', Arial, sans-serif" }}>
@@ -43,19 +42,6 @@ export default function Shell({
             />
             {globalOpen && globalQuery.trim() && (
               <div className="absolute mt-1 w-full bg-white rounded-lg shadow-lg border border-[#2f3b2f]/15 max-h-72 overflow-y-auto z-40">
-                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-[#2f3b2f]/10 flex-wrap sticky top-0 bg-white" style={{ WebkitBackfaceVisibility: "hidden", backfaceVisibility: "hidden", WebkitTransform: "translateZ(0)", transform: "translateZ(0)", willChange: "transform" }}>
-                  <button onClick={() => setGlobalTypeFilter("all")}
-                    className={`text-[11px] px-2 py-1 rounded-full border ${globalTypeFilter === "all" ? "bg-[#2f3b2f] text-white border-[#2f3b2f]" : "border-[#2f3b2f]/20 text-[#5c6b57]"}`}>
-                    {t.allTypes}
-                  </button>
-                  {MATERIAL_TYPES.filter((m) => m.id !== "mat_unassigned").map((m) => (
-                    <button key={m.id} onClick={() => setGlobalTypeFilter(m.id)}
-                      className="text-[11px] px-2 py-1 rounded-full border"
-                      style={globalTypeFilter === m.id ? { background: m.color, color: "white", borderColor: m.color } : { borderColor: m.color + "60", color: m.color }}>
-                      {nameOf(m.name, lang)}
-                    </button>
-                  ))}
-                </div>
                 {globalResults.length === 0 ? (
                   <div className="px-4 py-3 text-sm text-[#5c6b57]">{t.noMatches}</div>
                 ) : (
@@ -66,7 +52,6 @@ export default function Shell({
                         <div className="text-sm font-semibold truncate">{res.row.values.desc || res.row.values.ref || ""}</div>
                         <div className="text-xs text-[#5c6b57] flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <Tag size={10} /> {res.catName} · {res.row.values.qty ?? 0}
-                          <TypeBadge type={res.material} lang={lang} />
                         </div>
                       </div>
                       <LocationBadge loc={res.location} lang={lang} />
@@ -111,8 +96,8 @@ export default function Shell({
       </header>
 
       <div className="max-w-6xl mx-auto px-6 pt-5">
-        {activeModule != null && setActiveModule && (
-          <ModuleSwitcher active={activeModule} onChange={setActiveModule} t={t} />
+        {moduleSwitcherProps && (
+          <ModuleSwitcher {...moduleSwitcherProps} />
         )}
         <div className="flex items-center gap-2 flex-wrap mb-5">
           <button onClick={() => setActiveCat("__dashboard__")}

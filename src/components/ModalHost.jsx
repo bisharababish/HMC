@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { X, Tag, Minus, Plus, PackageMinus, Clock } from "lucide-react";
 import { nameOf, timeAgo } from "../i18n/strings.js";
 import { mkCat, parseWidth, normalizeMeterRef, rowTotalMeters, rowMeterSeverity } from "../utils/index.js";
-import { LocationSelect, TypeSelect } from "./ui.jsx";
+import { isFinishWidthSheet } from "../constants/index.js";
+import { LocationSelect } from "./ui.jsx";
 
 function modalKeyOf(modal) {
   if (!modal) return "";
@@ -294,43 +295,58 @@ export default function ModalHost({ modal, setModal, t, lang, categories, locati
     if (!c || !r) return null;
     const qty = Number(r.values.qty) || 0;
     const width = parseWidth(r.values.desc, r.values.ref);
+    const finishWidth = isFinishWidthSheet(c);
     const meterCode = normalizeMeterRef(r.values.ref) || r.values.ref || "";
-    const totalMeters = rowTotalMeters(r);
-    const meterSev = rowMeterSeverity(r);
+    const totalMeters = rowTotalMeters(r, c);
+    const meterSev = rowMeterSeverity(r, c);
     const clampedTake = Math.max(1, Math.min(takeAmt || 1, Math.max(1, qty)));
+    const finishLabel = (v) => {
+      if (lang === "ar" && v === "Matt") return "مات";
+      if (lang === "ar" && v === "Glossy") return "لامع";
+      return v;
+    };
 
     return (
       <ModalWrap title={t.itemDetails} wide onClose={close}>
         <div className="mb-4">
           <div className="text-xs text-[#5c6b57] mb-1 flex items-center gap-1"><Tag size={11} /> {nameOf(c.name, lang)}</div>
-          <div className="text-lg font-bold">{r.values.desc || "—"}</div>
-          {(width > 0 || qty > 0) && (
+          <div className="text-lg font-bold">{finishWidth ? finishLabel(r.values.desc) || "—" : (r.values.desc || "—")}</div>
+          {(finishWidth ? (r.values.desc || meterCode || qty > 0) : (width > 0 || qty > 0)) && (
             <div className="text-xs text-[#5c6b57] mt-1">
-              {qty} × {width.toLocaleString()} {lang === "ar" ? "عرض" : "width"}
-              {meterCode ? ` · ${lang === "ar" ? "رمز" : "code"} ${meterCode}` : ""}
-              {" = "}<span className="font-semibold">{totalMeters.toLocaleString()} {lang === "ar" ? "م كلي" : "m total"}</span>
+              {finishWidth ? (
+                <>
+                  {finishLabel(r.values.desc) || "—"}
+                  {meterCode ? ` · ${lang === "ar" ? "متر" : "Meters"} ${meterCode}` : ""}
+                  {" · "}{lang === "ar" ? "الكمية" : "Qty"} {qty}
+                </>
+              ) : (
+                <>
+                  {qty} × {width.toLocaleString()} {lang === "ar" ? "عرض" : "width"}
+                  {meterCode ? ` · ${lang === "ar" ? "رمز" : "code"} ${meterCode}` : ""}
+                  {" = "}<span className="font-semibold">{totalMeters.toLocaleString()} {lang === "ar" ? "م كلي" : "m total"}</span>
+                </>
+              )}
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.location}</label>
-            <LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(c.id, r.id, "location", v)} full />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.materialType}</label>
-            <TypeSelect value={r.values.type} lang={lang} onChange={(v) => changeCell(c.id, r.id, "type", v)} />
-          </div>
+        <div className="mb-4">
+          <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.location}</label>
+          <LocationSelect value={r.values.location} locations={locations} lang={lang} onChange={(v) => changeCell(c.id, r.id, "location", v)} full />
         </div>
 
         <div className={`rounded-lg border p-3 mb-4 flex items-center justify-between ${meterSev === "low" || meterSev === "out" ? "border-red-200 bg-red-50" : meterSev === "critical" ? "border-amber-300 bg-amber-50" : "border-[#2f3b2f]/10 bg-[#f4f2ec]"}`}>
           <div>
             <div className="text-xs text-[#5c6b57]">{t.availableQty}</div>
             <div className={`text-2xl font-bold ${meterSev ? "text-red-700" : "text-[#2f3b2f]"}`}>{qty}</div>
-            {r.values.ref && (
+            {r.values.ref && !finishWidth && (
               <div className={`text-sm mt-1 font-semibold ${meterSev === "critical" ? "text-amber-800" : meterSev ? "text-red-700" : "text-[#5c6b57]"}`}>
                 {lang === "ar" ? "إجمالي الأمتار" : "Total meters"}: {totalMeters.toLocaleString()}
+              </div>
+            )}
+            {finishWidth && meterCode && (
+              <div className="text-sm mt-1 text-[#5c6b57]">
+                {lang === "ar" ? "متر" : "Meters"}: {meterCode}
               </div>
             )}
           </div>

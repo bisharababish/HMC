@@ -75,16 +75,29 @@ function optionList(options, current) {
   return nums;
 }
 
+function sortWidthOptions(options) {
+  const allNumeric = options.every((o) => !Number.isNaN(Number(o)) && String(o).trim() !== "");
+  if (allNumeric) return optionList(options).sort((a, b) => Number(b) - Number(a));
+  return optionList(options);
+}
+
 export function WidthSelect({ value, options, lang, onChange, className = "" }) {
   if (!options?.length) return null;
   const rtl = lang === "ar";
-  const opts = optionList(options, value).sort((a, b) => Number(b) - Number(a));
+  const opts = sortWidthOptions(options);
+  const label = (w) => {
+    if (lang === "ar") {
+      if (w === "Matt") return "مات";
+      if (w === "Glossy") return "لامع";
+    }
+    return w;
+  };
   return (
     <div className={`relative inline-block w-full min-w-[4.5rem] ${className}`}>
       <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}
         className={`w-full appearance-none text-xs font-semibold ${rtl ? "pr-6 pl-2" : "pl-6 pr-2"} py-1.5 rounded border border-[#2f3b2f]/15 bg-white cursor-pointer outline-none focus:border-[#4a6b52]`}>
-        {!value && <option value="">{lang === "ar" ? "العرض" : "Width"}</option>}
-        {opts.map((w) => <option key={w} value={w}>{w}</option>)}
+        {!value && <option value="">{lang === "ar" ? "النوع" : "Finish"}</option>}
+        {opts.map((w) => <option key={w} value={w}>{label(w)}</option>)}
       </select>
       <ChevronDown size={10} className={`absolute ${rtl ? "right-1.5" : "left-1.5"} top-1/2 -translate-y-1/2 pointer-events-none text-[#5c6b57]`} />
     </div>

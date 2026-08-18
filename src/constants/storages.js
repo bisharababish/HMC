@@ -3,7 +3,7 @@ import { rid } from "../utils/index.js";
 export const STORAGE_COLUMNS = () => [
   { key: "item", label: { en: "Item / Contents", ar: "الصنف / المحتويات" }, type: "text" },
   { key: "boxes", label: { en: "Boxes", ar: "صناديق" }, type: "number" },
-  { key: "units", label: { en: "Units", ar: "وحدات" }, type: "number" },
+  { key: "pallets", label: { en: "Pallets", ar: "مشاتيح" }, type: "number" },
   { key: "notes", label: { en: "Notes", ar: "ملاحظات" }, type: "text" },
 ];
 
@@ -27,6 +27,15 @@ export function seedStorageSites() {
   }));
 }
 
+function normalizeStorageRow(row) {
+  if (!row?.values) return row;
+  const v = { ...row.values };
+  if (v.pallets == null && v.units != null) v.pallets = v.units;
+  if (v.pallets == null) v.pallets = 0;
+  delete v.units;
+  return { ...row, values: v };
+}
+
 export function normalizeStorageSites(sites) {
   if (!Array.isArray(sites) || sites.length === 0) return seedStorageSites();
   const defaults = DEFAULT_STORAGE_SITES();
@@ -37,17 +46,25 @@ export function normalizeStorageSites(sites) {
       id: def.id,
       name: existing.name?.en || existing.name?.ar ? existing.name : def.name,
       color: existing.color || def.color,
-      rows: Array.isArray(existing.rows) ? existing.rows : [],
+      rows: Array.isArray(existing.rows) ? existing.rows.map(normalizeStorageRow) : [],
     };
   });
 }
 
+export function normalizeStorageLog(log) {
+  if (!Array.isArray(log)) return [];
+  return log.map((e) => ({
+    ...e,
+    palletsTaken: e.palletsTaken ?? e.unitsTaken ?? 0,
+  }));
+}
+
 export function storageSiteTotals(site) {
   let boxes = 0;
-  let units = 0;
+  let pallets = 0;
   (site.rows || []).forEach((r) => {
     boxes += Number(r.values?.boxes) || 0;
-    units += Number(r.values?.units) || 0;
+    pallets += Number(r.values?.pallets ?? r.values?.units) || 0;
   });
-  return { items: site.rows?.length || 0, boxes, units };
+  return { items: site.rows?.length || 0, boxes, pallets };
 }

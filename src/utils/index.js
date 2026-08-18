@@ -1,4 +1,4 @@
-import { DEFAULT_COLUMNS, MATERIAL_TYPES, METERS_CRITICAL_THRESHOLD, METERS_LOW_THRESHOLD, parseWidth, normalizeMeterRef, meterCodesForRow } from "../constants/index.js";
+import { DEFAULT_COLUMNS, MATERIAL_TYPES, METERS_CRITICAL_THRESHOLD, METERS_LOW_THRESHOLD, parseWidth, normalizeMeterRef, meterCodesForRow, isFinishWidthSheet } from "../constants/index.js";
 import { nameOf } from "../i18n/strings.js";
 
 export function cat() { return "c_" + Math.random().toString(36).slice(2, 10); }
@@ -17,15 +17,17 @@ export function parseMeters(ref) {
 
 export { normalizeMeterRef, meterCodesForRow, parseWidth };
 
-/** Total meters in stock = quantity × width */
-export function rowTotalMeters(row) {
+/** Total meters in stock = quantity × width (mm). Finish sheets (Matt/Glossy) have no width-based total. */
+export function rowTotalMeters(row, category) {
+  if (category && isFinishWidthSheet(category)) return 0;
   const qty = Number(row?.values?.qty) || 0;
   const width = parseWidth(row?.values?.desc, row?.values?.ref);
-  return qty * width;
+  if (width > 0) return qty * width;
+  return 0;
 }
 
-export function isRowLowMeterStock(row) {
-  return rowMeterSeverity(row) !== null;
+export function isRowLowMeterStock(row, category) {
+  return rowMeterSeverity(row, category) !== null;
 }
 
 /** null = ok · low = below 10k (red) · critical = below 5k (yellow) · out = qty is zero */
@@ -42,9 +44,12 @@ export function isMeterLowStock(meters, qty) {
   return meterStockSeverity(meters, qty) !== null;
 }
 
-export function rowMeterSeverity(row) {
+export function rowMeterSeverity(row, category) {
   const qty = Number(row?.values?.qty) || 0;
-  return meterStockSeverity(rowTotalMeters(row), qty);
+  if (category && isFinishWidthSheet(category)) {
+    return qty <= 0 ? "out" : null;
+  }
+  return meterStockSeverity(rowTotalMeters(row, category), qty);
 }
 
 export function meterRowClass(severity) {
@@ -63,14 +68,12 @@ export function toCSV(category, locations, lang) {
   const cols = [
     ...category.columns,
     { key: "__location__", label: { en: "Location", ar: "المكان" } },
-    { key: "__type__", label: { en: "Material", ar: "المادة" } },
   ];
   const header = cols.map((c) => `"${nameOf(c.label, lang).replace(/"/g, '""')}"`).join(",");
   const lines = category.rows.map((r) => {
     const locName = nameOf(locations.find((l) => l.id === r.values.location)?.name, lang) || "";
-    const typeName = nameOf(MATERIAL_TYPES.find((m) => m.id === r.values.type)?.name, lang) || "";
     return cols.map((c) => {
-      const v = c.key === "__location__" ? locName : c.key === "__type__" ? typeName : r.values[c.key];
+      const v = c.key === "__location__" ? locName : r.values[c.key];
       return `"${String(v ?? "").replace(/"/g, '""')}"`;
     }).join(",");
   });

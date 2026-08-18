@@ -46,7 +46,21 @@ export const METER_CODES_BY_SHEET = {
   Plastic: [33, 32, 30, 28, 27, 26, 20, 16],
   "Clear Plastic": [33, 32, 30, 28, 27, 26, 20, 16],
   Silver: [33, 32, 30, 28, 27, 26, 20, 16],
+  Lamination: [33, 32, 30, 28, 27, 26, 20, 16],
 };
+
+/** Sheet tabs whose Width column uses finish labels (Matt / Glossy) instead of mm */
+export const FINISH_WIDTH_SHEETS = new Set(["Lamination"]);
+
+export function sheetConfigKey(category) {
+  const en = (category?.name?.en || "").trim();
+  if (/lamination/i.test(en)) return "Lamination";
+  return en;
+}
+
+export function isFinishWidthSheet(category) {
+  return FINISH_WIDTH_SHEETS.has(sheetConfigKey(category));
+}
 
 function sortCodesDesc(codes) {
   return [...codes].sort((a, b) => Number(b) - Number(a));
@@ -60,7 +74,7 @@ function meterCodesForSheet(sheetName) {
 }
 
 function materialListForRow(row, category) {
-  const sheet = category?.name?.en || "";
+  const sheet = sheetConfigKey(category);
   const bySheet = meterCodesForSheet(sheet);
   if (bySheet) return bySheet;
 
@@ -118,13 +132,14 @@ export const WIDTH_BY_MATERIAL = {
   mat_unassigned: [],
 };
 
-/** Full width lists per sheet tab */
+/** Full width lists per sheet tab — numeric mm or finish labels (Matt / Glossy) */
 export const WIDTH_BY_SHEET = {
   Paper: [1800],
   "FSC Coated Paper": [1000, 950, 800],
   Plastic: [2050, 2000, 1500, 1000, 990, 970, 950, 940, 880, 800],
   "Clear Plastic": [2050, 2000, 1800, 1500, 1000, 990, 970, 950, 940, 800],
   Silver: [1000, 950, 800],
+  Lamination: ["Matt", "Glossy"],
 };
 
 function sortWidthsDesc(widths) {
@@ -139,19 +154,23 @@ function widthsForSheet(sheetName) {
 }
 
 export function widthsForRow(row, category) {
-  const sheet = category?.name?.en || "";
+  const sheet = sheetConfigKey(category);
   const bySheet = widthsForSheet(sheet);
-  if (bySheet) return sortWidthsDesc(bySheet);
+  if (bySheet) {
+    const nums = bySheet.every((w) => !Number.isNaN(Number(w)));
+    return nums ? sortWidthsDesc(bySheet) : [...bySheet];
+  }
 
   const typeId = row?.values?.type;
   let list = [];
+  const legacySheet = category?.name?.en || "";
   if (typeId && typeId !== "mat_unassigned" && WIDTH_BY_MATERIAL[typeId]?.length) {
     list = WIDTH_BY_MATERIAL[typeId];
   } else {
-    if (sheet === "Silver") list = WIDTH_BY_MATERIAL.mat_silver;
-    else if (sheet === "Clear Plastic") list = WIDTH_BY_MATERIAL.mat_transparent;
-    else if (sheet === "Plastic") list = WIDTH_BY_MATERIAL.mat_plastic;
-    else if (/paper/i.test(sheet)) list = WIDTH_BY_MATERIAL.mat_paper;
+    if (legacySheet === "Silver") list = WIDTH_BY_MATERIAL.mat_silver;
+    else if (legacySheet === "Clear Plastic") list = WIDTH_BY_MATERIAL.mat_transparent;
+    else if (legacySheet === "Plastic") list = WIDTH_BY_MATERIAL.mat_plastic;
+    else if (/paper/i.test(legacySheet)) list = WIDTH_BY_MATERIAL.mat_paper;
     else if (typeId && WIDTH_BY_MATERIAL[typeId]?.length) list = WIDTH_BY_MATERIAL[typeId];
   }
   return sortWidthsDesc(list);

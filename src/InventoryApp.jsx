@@ -4,35 +4,38 @@ import {
   Search, ArrowUpDown, X, MapPin, AlertTriangle, Eye, PackageMinus, Clock, History, Pencil,
 } from "lucide-react";
 import { STR, nameOf, timeAgo } from "./i18n/strings.js";
-import { DEFAULT_LOCATIONS, MATERIAL_TYPES, STORAGE_KEY, MAX_HISTORY, MAX_LOG, normalizeLocations } from "./constants/index.js";
+import { DEFAULT_LOCATIONS, STORAGE_KEY, MAX_HISTORY, MAX_LOG, normalizeLocations } from "./constants/index.js";
 import { seedCategories, row, rid, toCSV, downloadText, swapPlasticSheetNames, parseWidth, normalizeMeterRef, rowTotalMeters, rowMeterSeverity, isRowLowMeterStock, meterRowClass, meterCellClass } from "./utils/index.js";
-import { widthsForRow, meterCodesForRow } from "./constants/index.js";
+import { widthsForRow, meterCodesForRow, isFinishWidthSheet } from "./constants/index.js";
 import Shell from "./components/Shell.jsx";
 import ModalHost from "./components/ModalHost.jsx";
 import StorageModule from "./StorageModule.jsx";
-import { seedStorageSites, normalizeStorageSites } from "./constants/storages.js";
+import { seedStorageSites, normalizeStorageSites, normalizeStorageLog } from "./constants/storages.js";
+import {
+  normalizeAppState, buildPersistPayload, createModule, createEmptyModuleData,
+  applyLabelingData, applyStorageData, hydrateInitialModuleState,
+} from "./constants/modules.js";
+import ModuleModals from "./components/ModuleModals.jsx";
 import Pagination from "./components/Pagination.jsx";
 import OverflowMenu from "./components/OverflowMenu.jsx";
 import { fetchBackupHistory, loadBackupSnapshot, wasLastSaveCloud, clearAllBackups, createBackupSnapshot } from "./lib/db.js";
 import { isSupabaseEnabled } from "./lib/supabase.js";
-import { Panel, StatCard, LocationBadge, TypeBadge, LocationSelect, SheetCellInput, WidthSelect, MetersCodeSelect } from "./components/ui.jsx";
+import { Panel, StatCard, LocationBadge, LocationSelect, SheetCellInput, WidthSelect, MetersCodeSelect } from "./components/ui.jsx";
 export default function InventoryApp() {
-  const [categories, setCategories] = useState(null);
+  const [categories, setCategories] = useState([]);
   const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
   const [checkoutLog, setCheckoutLog] = useState([]);
   const [lang, setLang] = useState("en");
-  const [activeCat, setActiveCat] = useState(null);
+  const [activeCat, setActiveCat] = useState("__dashboard__");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [locFilter, setLocFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState(1);
   const [toast, setToast] = useState(null);
   const [globalQuery, setGlobalQuery] = useState("");
   const [globalOpen, setGlobalOpen] = useState(false);
-  const [globalTypeFilter, setGlobalTypeFilter] = useState("all");
   const [flashRow, setFlashRow] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [modal, setModal] = useState(null);
@@ -46,8 +49,11 @@ export default function InventoryApp() {
   const [cloudSavedAt, setCloudSavedAt] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [backups, setBackups] = useState([]);
-  const [activeModule, setActiveModule] = useState("labeling");
-  const [storageSites, setStorageSites] = useState(null);
+  const [modules, setModules] = useState([]);
+  const [activeModuleId, setActiveModuleId] = useState(null);
+  const [moduleData, setModuleData] = useState({});
+  const [moduleModal, setModuleModal] = useState(null);
+  const [storageSites, setStorageSites] = useState(() => seedStorageSites());
   const [storageLog, setStorageLog] = useState([]);
   const saveTimer = useRef(null);
   const history = useRef([]);
@@ -55,49 +61,130 @@ export default function InventoryApp() {
 
   const t = STR[lang];
   const dir = lang === "ar" ? "rtl" : "ltr";
+  const activeModuleMeta = modules.find((m) => m.id === activeModuleId);
+  const isStorageModule = activeModuleMeta?.type === "storages";
+
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
+
+  const applyModuleSnapshot = useCallback((mod, data) => {
+    if (!mod) return;
+    if (mod.type === "labeling") {
+      applyLabelingData(data, { setCategories, setLocations, setCheckoutLog, setActiveCat });
+    } else {
+      applyStorageData(data, { setStorageSites, setStorageLog });
+    }
+  }, []);
+
+  const snapshotActiveModule = useCallback(() => {
+    if (!activeModuleMeta) return null;
+    if (activeModuleMeta.type === "labeling") {
+      return { categories, locations: normalizeLocations(locations), checkoutLog };
+    }
+    return { sites: storageSites, log: storageLog };
+  }, [activeModuleMeta, categories, locations, checkoutLog, storageSites, storageLog]);
+
+  const switchModule = useCallback((newId) => {
+    if (!newId || newId === activeModuleId) return;
+    const nextMod = modules.find((m) => m.id === newId);
+    if (!nextMod) return;
+    setModuleData((prev) => {
+      const updated = { ...prev };
+      if (activeModuleId && activeModuleMeta) {
+        if (activeModuleMeta.type === "labeling") {
+          updated[activeModuleId] = { categories, locations: normalizeLocations(locations), checkoutLog };
+        } else {
+          updated[activeModuleId] = { sites: storageSites, log: storageLog };
+        }
+      }
+      const target = updated[newId] || createEmptyModuleData(nextMod.type);
+      applyModuleSnapshot(nextMod, target);
+      return updated;
+    });
+    setActiveModuleId(newId);
+  }, [activeModuleId, activeModuleMeta, modules, categories, locations, checkoutLog, storageSites, storageLog, applyModuleSnapshot]);
+
+  const handleModuleSave = useCallback((payload) => {
+    if (payload.kind === "add") {
+      const mod = createModule(payload.type, payload.nameEn, payload.nameAr, payload.color);
+      const empty = createEmptyModuleData(mod.type);
+      setModules((prev) => [...prev, mod]);
+      setModuleData((prev) => ({ ...prev, [mod.id]: empty }));
+      if (activeModuleId && activeModuleMeta) {
+        setModuleData((prev) => {
+          const updated = { ...prev, [mod.id]: empty };
+          if (activeModuleMeta.type === "labeling") {
+            updated[activeModuleId] = { categories, locations: normalizeLocations(locations), checkoutLog };
+          } else {
+            updated[activeModuleId] = { sites: storageSites, log: storageLog };
+          }
+          return updated;
+        });
+      }
+      applyModuleSnapshot(mod, empty);
+      setActiveModuleId(mod.id);
+      showToast(t.toastModuleAdded);
+      return;
+    }
+    setModules((prev) => prev.map((m) => (
+      m.id === payload.moduleId
+        ? { ...m, name: { en: payload.nameEn.trim() || m.name.en, ar: payload.nameAr.trim() || m.name.ar }, color: payload.color }
+        : m
+    )));
+    showToast(t.toastModuleUpdated);
+  }, [activeModuleId, activeModuleMeta, categories, locations, checkoutLog, storageSites, storageLog, applyModuleSnapshot, showToast, t]);
+
+  const handleModuleDelete = useCallback((moduleId) => {
+    if (modules.length <= 1) return;
+    const remaining = modules.filter((m) => m.id !== moduleId);
+    setModules(remaining);
+    setModuleData((prev) => {
+      const next = { ...prev };
+      delete next[moduleId];
+      return next;
+    });
+    if (activeModuleId === moduleId) {
+      const nextMod = remaining[0];
+      const target = moduleData[nextMod.id] || createEmptyModuleData(nextMod.type);
+      applyModuleSnapshot(nextMod, target);
+      setActiveModuleId(nextMod.id);
+    }
+    showToast(t.toastModuleDeleted);
+  }, [modules, activeModuleId, moduleData, applyModuleSnapshot, showToast, t]);
+
+  const moduleSetters = { setCategories, setLocations, setCheckoutLog, setActiveCat, setStorageSites, setStorageLog };
 
   useEffect(() => {
     (async () => {
+      const finishLoad = (normalized) => {
+        setModules(normalized.modules);
+        setModuleData(normalized.moduleData);
+        setActiveModuleId(normalized.activeModuleId);
+        setLang(normalized.lang);
+        hydrateInitialModuleState(normalized, moduleSetters, swapPlasticSheetNames);
+      };
       if (!isSupabaseEnabled()) {
         setLoadError("Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env, then restart the dev server.");
-        setCategories([]);
-        setLocations(DEFAULT_LOCATIONS);
-        setStorageSites(seedStorageSites());
-        setActiveCat("__dashboard__");
+        finishLoad(normalizeAppState({}));
         setLoaded(true);
         return;
       }
       try {
         const res = await window.storage.get(STORAGE_KEY, false);
         if (res && res.value) {
-          const parsed = JSON.parse(res.value);
-          const cats = parsed.categories ?? (Array.isArray(parsed) ? parsed : null);
-          if (Array.isArray(cats)) {
-            setCategories(cats.length > 0 ? swapPlasticSheetNames(cats) : []);
-          } else {
-            setCategories(seedCategories());
-          }
-          setLocations(normalizeLocations(parsed.locations));
-          setCheckoutLog(parsed.checkoutLog || []);
-          setStorageSites(normalizeStorageSites(parsed.storageSites));
-          setStorageLog(parsed.storageLog || []);
-          if (parsed.activeModule === "labeling" || parsed.activeModule === "storages") setActiveModule(parsed.activeModule);
-          if (parsed.lang === "en" || parsed.lang === "ar") setLang(parsed.lang);
+          finishLoad(normalizeAppState(JSON.parse(res.value)));
           if (res.updated_at) setCloudSavedAt(res.updated_at);
         } else {
-          setCategories([]);
-          setLocations(DEFAULT_LOCATIONS);
-          setStorageSites(seedStorageSites());
+          finishLoad(normalizeAppState({}));
         }
         setBackups(await fetchBackupHistory());
       } catch (e) {
         console.error("Load failed", e);
         setLoadError("Could not load from Supabase. Check your connection and SQL setup.");
-        setCategories([]);
-        setLocations(DEFAULT_LOCATIONS);
-        setStorageSites(seedStorageSites());
+        finishLoad(normalizeAppState({}));
       }
-      setActiveCat("__dashboard__");
       setLoaded(true);
     })();
   }, []);
@@ -105,8 +192,6 @@ export default function InventoryApp() {
   useEffect(() => {
     if (loaded && locations.length === 0) setLocations(DEFAULT_LOCATIONS);
   }, [loaded, locations.length]);
-
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
 
   const persist = useCallback((data) => {
     if (!isSupabaseEnabled()) return;
@@ -126,18 +211,20 @@ export default function InventoryApp() {
   }, [lang]);
 
   useEffect(() => {
-    if (!loaded || !categories || !storageSites) return;
-    persist({
+    if (!loaded || !modules.length || !activeModuleId) return;
+    persist(buildPersistPayload({
+      modules,
+      activeModuleId,
+      moduleData,
       categories,
-      locations: normalizeLocations(locations),
+      locations,
       checkoutLog,
-      lang,
-      activeModule,
       storageSites,
       storageLog,
-    });
-  }, [categories, locations, checkoutLog, lang, activeModule, storageSites, storageLog, loaded, persist]);
-  useEffect(() => { setPage(1); }, [activeCat, query, locFilter, typeFilter, sortKey]);
+      lang,
+    }));
+  }, [modules, activeModuleId, moduleData, categories, locations, checkoutLog, storageSites, storageLog, lang, loaded, persist]);
+  useEffect(() => { setPage(1); }, [activeCat, query, locFilter, sortKey]);
   useEffect(() => { setBackupPage(1); }, [backups.length, backupPageSize]);
 
   useEffect(() => {
@@ -160,7 +247,7 @@ export default function InventoryApp() {
     showToast(t.toastUndone);
   };
 
-  if (!loaded || !categories || !storageSites) {
+  if (!loaded || !modules.length || !activeModuleId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f4f2ec]">
         <div className="flex items-center gap-2 text-[#2f3b2f]">
@@ -174,14 +261,20 @@ export default function InventoryApp() {
   const current = categories.find((c) => c.id === activeCat);
   const isDashboard = activeCat === "__dashboard__" || !current;
   const locOf = (id) => locations.find((l) => l.id === id) || locations.find((l) => l.id === "loc_unassigned") || DEFAULT_LOCATIONS[DEFAULT_LOCATIONS.length - 1];
-  const typeOf = (id) => MATERIAL_TYPES.find((m) => m.id === id) || MATERIAL_TYPES.find((m) => m.id === "mat_unassigned") || MATERIAL_TYPES[MATERIAL_TYPES.length - 1];
 
   const updateCategory = (catId, updater) => withHistory((prev) => prev.map((c) => (c.id === catId ? updater(c) : c)));
 
   const changeCell = (catId, rowId, key, value) => {
     updateCategory(catId, (c) => ({
       ...c,
-      rows: c.rows.map((r) => (r.id === rowId ? { ...r, values: { ...r.values, [key]: value, ...(key === "qty" ? { lastUpdated: Date.now() } : {}) } } : r)),
+      rows: c.rows.map((r) => (r.id === rowId ? {
+        ...r,
+        values: {
+          ...r.values,
+          [key]: value,
+          ...(key === "qty" || key === "desc" || key === "ref" ? { lastUpdated: Date.now() } : {}),
+        },
+      } : r)),
     }));
   };
 
@@ -316,23 +409,21 @@ export default function InventoryApp() {
     categories.forEach((c) => {
       c.rows.forEach((r) => {
         const hay = c.columns.map((col) => String(r.values[col.key] ?? "")).join(" ").toLowerCase();
-        if (hay.includes(q)) globalResults.push({ catId: c.id, catName: nameOf(c.name, lang), row: r, location: locOf(r.values.location), material: typeOf(r.values.type) });
+        if (hay.includes(q)) globalResults.push({ catId: c.id, catName: nameOf(c.name, lang), row: r, location: locOf(r.values.location) });
       });
     });
-    if (globalTypeFilter !== "all") globalResults = globalResults.filter((res) => res.row.values.type === globalTypeFilter);
   }
 
   const restoreBackup = async (id) => {
     const data = await loadBackupSnapshot(id);
     if (!data) return;
     history.current.push(JSON.stringify(categories));
-    setCategories(swapPlasticSheetNames(data.categories || data));
-    setLocations(normalizeLocations(data.locations));
-    setCheckoutLog(data.checkoutLog || []);
-    setStorageSites(normalizeStorageSites(data.storageSites));
-    setStorageLog(data.storageLog || []);
-    if (data.activeModule === "labeling" || data.activeModule === "storages") setActiveModule(data.activeModule);
-    if (data.lang === "en" || data.lang === "ar") setLang(data.lang);
+    const normalized = normalizeAppState(data);
+    setModules(normalized.modules);
+    setModuleData(normalized.moduleData);
+    setActiveModuleId(normalized.activeModuleId);
+    if (normalized.lang === "en" || normalized.lang === "ar") setLang(normalized.lang);
+    hydrateInitialModuleState(normalized, moduleSetters, swapPlasticSheetNames);
     showToast(t.snapshotRestored);
   };
 
@@ -348,15 +439,17 @@ export default function InventoryApp() {
 
   const saveBackupNow = async () => {
     try {
-      await createBackupSnapshot({
+      await createBackupSnapshot(buildPersistPayload({
+        modules,
+        activeModuleId,
+        moduleData,
         categories,
-        locations: normalizeLocations(locations),
+        locations,
         checkoutLog,
-        lang,
-        activeModule,
         storageSites,
         storageLog,
-      });
+        lang,
+      }));
       setBackups(await fetchBackupHistory());
       showToast(t.toastBackupSaved);
     } catch {
@@ -369,36 +462,53 @@ export default function InventoryApp() {
     showToast(t.toastActivityCleared);
   };
 
-  const shellProps = {
-    t, lang, setLang, title: t.appTitle, subtitle: t.appSubtitle, saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat,
-    addCategory: () => setModal({ kind: "addSheet" }), undo, toast, dir,
-    globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, jumpToResult, openDetail,
-    globalTypeFilter, setGlobalTypeFilter, helpOpen, setHelpOpen, loadError,
-    activeModule, setActiveModule,
+  const moduleSwitcherProps = {
+    modules,
+    activeModuleId,
+    onChange: switchModule,
+    onAdd: () => setModuleModal({ kind: "addModule" }),
+    onEdit: (moduleId) => setModuleModal({ kind: "editModule", module: modules.find((m) => m.id === moduleId) }),
+    lang,
+    t,
   };
 
-  if (activeModule === "storages") {
+  const shellProps = {
+    t, lang, setLang,
+    title: activeModuleMeta ? nameOf(activeModuleMeta.name, lang) : t.appTitle,
+    subtitle: t.appSubtitle,
+    saving, cloudSynced, cloudSavedAt, categories, activeCat, setActiveCat,
+    addCategory: () => setModal({ kind: "addSheet" }), undo, toast, dir,
+    globalQuery, setGlobalQuery, globalOpen, setGlobalOpen, globalResults, globalBoxRef, jumpToResult, openDetail,
+    helpOpen, setHelpOpen, loadError,
+    moduleSwitcherProps,
+  };
+
+  if (isStorageModule) {
     return (
-      <StorageModule
-        sites={storageSites}
-        setSites={setStorageSites}
-        storageLog={storageLog}
-        setStorageLog={setStorageLog}
-        lang={lang}
-        setLang={setLang}
-        activeModule={activeModule}
-        setActiveModule={setActiveModule}
-        saving={saving}
-        cloudSynced={cloudSynced}
-        cloudSavedAt={cloudSavedAt}
-        loadError={loadError}
-      />
+      <>
+        <StorageModule
+          sites={storageSites}
+          setSites={setStorageSites}
+          storageLog={storageLog}
+          setStorageLog={setStorageLog}
+          lang={lang}
+          setLang={setLang}
+          saving={saving}
+          cloudSynced={cloudSynced}
+          cloudSavedAt={cloudSavedAt}
+          loadError={loadError}
+          moduleTitle={activeModuleMeta ? nameOf(activeModuleMeta.name, lang) : t.storageTitle}
+          moduleSwitcherProps={moduleSwitcherProps}
+        />
+        <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} />
+        {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 text-white text-sm px-4 py-2 rounded-full shadow-lg z-50" style={{ backgroundColor: "#2f3b2f" }}>{toast}</div>}
+      </>
     );
   }
 
   const modalHostProps = {
     modal, setModal, t, lang, categories, locations, checkoutLog, setLocations, withHistory, setActiveCat, showToast,
-    deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult, typeOf, locOf,
+    deleteRowNow, deleteCategoryNow, updateCategory, changeCell, bumpQty, takeOutStock, jumpToResult, locOf,
     deleteActivityEntry, saveActivityEdit, clearBackupHistory, clearAllActivity, deleteLocationNow,
   };
 
@@ -407,15 +517,15 @@ export default function InventoryApp() {
     const grand = categories.reduce((s, c) => s + c.rows.reduce((rs, r) => rs + (Number(r.values.qty) || 0), 0), 0);
     const lowStockItems = [];
     categories.forEach((c) => c.rows.forEach((r) => {
-      const totalMeters = rowTotalMeters(r);
-      const severity = rowMeterSeverity(r);
+      const totalMeters = rowTotalMeters(r, c);
+      const severity = rowMeterSeverity(r, c);
       if (severity) {
         const target = severity === "out" ? 0 : severity === "critical" ? 5000 : 10000;
         const deficit = severity === "out" ? 0 : Math.max(0, target - totalMeters);
         const qty = Number(r.values.qty) || 0;
         const width = parseWidth(r.values.desc, r.values.ref);
         const meterCode = normalizeMeterRef(r.values.ref) || r.values.ref;
-        lowStockItems.push({ cat: nameOf(c.name, lang), catId: c.id, rowId: r.id, desc: r.values.desc, ref: meterCode, qty, width, totalMeters, deficit, severity, location: locOf(r.values.location), material: typeOf(r.values.type), lastUpdated: r.values.lastUpdated });
+        lowStockItems.push({ cat: nameOf(c.name, lang), catId: c.id, rowId: r.id, desc: r.values.desc, ref: meterCode, qty, width, totalMeters, deficit, severity, location: locOf(r.values.location), lastUpdated: r.values.lastUpdated });
       }
     }));
     lowStockItems.sort((a, b) => a.totalMeters - b.totalMeters);
@@ -485,7 +595,6 @@ export default function InventoryApp() {
                 <thead>
                   <tr className="bg-[#f4f2ec] text-[#5c6b57]">
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.sheet}</th>
-                    <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.materialType}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.location}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{lang === "ar" ? "العرض" : "Width"}</th>
                     <th className={`px-4 py-2 ${lang === "ar" ? "text-right" : "text-left"}`}>{t.itemCount}</th>
@@ -500,7 +609,6 @@ export default function InventoryApp() {
                   {pagedLowStock.map((it, i) => (
                     <tr key={i} className="border-t border-[#2f3b2f]/10 hover:bg-[#f4f2ec]/50">
                       <td className="px-4 py-2"><button onClick={() => openDetail(it.catId, it.rowId)} className="text-[#8a5a2e] hover:underline">{it.cat}</button></td>
-                      <td className="px-4 py-2"><TypeBadge type={it.material} lang={lang} /></td>
                       <td className="px-4 py-2"><LocationBadge loc={it.location} lang={lang} /></td>
                       <td className="px-4 py-2">{it.desc || "—"}</td>
                       <td className="px-4 py-2">{it.qty}</td>
@@ -666,8 +774,7 @@ export default function InventoryApp() {
   let visibleRows = current.rows.filter((r) => {
     const matchesQuery = !query.trim() || current.columns.some((col) => String(r.values[col.key] ?? "").toLowerCase().includes(query.trim().toLowerCase()));
     const matchesLoc = locFilter === "all" || r.values.location === locFilter;
-    const matchesType = typeFilter === "all" || r.values.type === typeFilter;
-    return matchesQuery && matchesLoc && matchesType;
+    return matchesQuery && matchesLoc;
   });
   if (sortKey) {
     const col = current.columns.find((c) => c.key === sortKey);
@@ -678,7 +785,7 @@ export default function InventoryApp() {
     });
   }
   const total = current.rows.reduce((sum, r) => sum + (Number(r.values.qty) || 0), 0);
-  const lowCount = current.rows.filter((r) => isRowLowMeterStock(r)).length;
+  const lowCount = current.rows.filter((r) => isRowLowMeterStock(r, current)).length;
   const toggleSort = (key) => { if (sortKey === key) setSortDir((d) => -d); else { setSortKey(key); setSortDir(1); } };
   const qtyColIndex = current.columns.findIndex((c) => c.key === "qty");
 
@@ -710,10 +817,6 @@ export default function InventoryApp() {
               <option value="all">{t.allLocations}</option>
               {locations.map((l) => <option key={l.id} value={l.id}>{nameOf(l.name, lang)}</option>)}
             </select>
-            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="text-xs px-2 py-1.5 rounded border border-[#2f3b2f]/20 bg-white outline-none">
-              <option value="all">{t.allTypes}</option>
-              {MATERIAL_TYPES.map((m) => <option key={m.id} value={m.id}>{nameOf(m.name, lang)}</option>)}
-            </select>
             <button onClick={() => addRow(current.id)} className="text-xs flex items-center gap-1 px-3 py-1.5 rounded font-semibold" style={{ backgroundColor: "#8a5a2e", color: "#ffffff" }}>
               <PlusCircle size={14} /> {t.newItem}
             </button>
@@ -734,7 +837,7 @@ export default function InventoryApp() {
                   <th key={col.key} className={`px-3 py-2 font-semibold whitespace-nowrap ${lang === "ar" ? "text-right" : "text-left"}`}>
                     <div className="flex items-center gap-1 justify-between">
                       <button onClick={() => toggleSort(col.key)} className="flex items-center gap-1 hover:text-[#8a5a2e]">
-                        <span>{nameOf(col.label, lang)}</span>
+                        <span>{col.key === "desc" && isFinishWidthSheet(current) ? (lang === "ar" ? "النوع" : "Finish") : nameOf(col.label, lang)}</span>
                         <ArrowUpDown size={11} className={sortKey === col.key ? "opacity-100" : "opacity-30"} />
                       </button>
                       {col.key !== "qty" && col.key !== "desc" && (
@@ -751,8 +854,8 @@ export default function InventoryApp() {
                 <tr><td colSpan={current.columns.length + 3} className="px-4 py-8 text-center text-[#5c6b57]">{t.noResultsRow}</td></tr>
               )}
               {pagedRows.map((r, i) => {
-                const severity = rowMeterSeverity(r);
-                const totalMeters = rowTotalMeters(r);
+                const severity = rowMeterSeverity(r, current);
+                const totalMeters = rowTotalMeters(r, current);
                 const widthOpts = widthsForRow(r, current);
                 const meterOpts = meterCodesForRow(r, current);
                 const isFlashed = flashRow === r.id;
@@ -821,6 +924,7 @@ export default function InventoryApp() {
       </div>
 
       <ModalHost {...modalHostProps} />
+      <ModuleModals modal={moduleModal} setModal={setModuleModal} t={t} onSave={handleModuleSave} onDelete={handleModuleDelete} />
     </Shell>
   );
 }

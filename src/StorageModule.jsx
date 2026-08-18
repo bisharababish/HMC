@@ -28,7 +28,8 @@ function ModalWrap({ title, children, onClose, wide }) {
 
 export default function StorageModule({
   sites, setSites, storageLog, setStorageLog, lang, setLang,
-  activeModule, setActiveModule, saving, cloudSynced, cloudSavedAt, loadError,
+  saving, cloudSynced, cloudSavedAt, loadError,
+  moduleTitle, moduleSwitcherProps,
 }) {
   const [activeSite, setActiveSite] = useState("__storage_dashboard__");
   const [query, setQuery] = useState("");
@@ -42,7 +43,7 @@ export default function StorageModule({
   const [editNameAr, setEditNameAr] = useState("");
   const [editColor, setEditColor] = useState("#2e7d46");
   const [takeBoxes, setTakeBoxes] = useState(1);
-  const [takeUnits, setTakeUnits] = useState(0);
+  const [takePallets, setTakePallets] = useState(0);
   const [takeNote, setTakeNote] = useState("");
 
   const t = STR[lang];
@@ -86,7 +87,7 @@ export default function StorageModule({
   const addRow = (siteId) => {
     updateSite(siteId, (s) => ({
       ...s,
-      rows: [...s.rows, storageRow({ item: "", boxes: 0, units: 0, notes: "" })],
+      rows: [...s.rows, storageRow({ item: "", boxes: 0, pallets: 0, notes: "" })],
     }));
   };
 
@@ -94,14 +95,14 @@ export default function StorageModule({
     updateSite(siteId, (s) => ({ ...s, rows: s.rows.filter((r) => r.id !== rowId) }));
   };
 
-  const takeOut = (siteId, rowId, boxes, units, note) => {
+  const takeOut = (siteId, rowId, boxes, pallets, note) => {
     const site = sites.find((s) => s.id === siteId);
     const row = site?.rows.find((r) => r.id === rowId);
     if (!site || !row) return;
     const availB = Number(row.values.boxes) || 0;
-    const availU = Number(row.values.units) || 0;
+    const availP = Number(row.values.pallets ?? row.values.units) || 0;
     const takeB = Math.max(0, Math.min(boxes, availB));
-    const takeU = Math.max(0, Math.min(units, availU));
+    const takeP = Math.max(0, Math.min(pallets, availP));
     updateSite(siteId, (s) => ({
       ...s,
       rows: s.rows.map((r) =>
@@ -111,7 +112,7 @@ export default function StorageModule({
               values: {
                 ...r.values,
                 boxes: availB - takeB,
-                units: availU - takeU,
+                pallets: availP - takeP,
                 lastUpdated: Date.now(),
               },
             }
@@ -127,7 +128,7 @@ export default function StorageModule({
         rowId,
         item: row.values.item,
         boxesTaken: takeB,
-        unitsTaken: takeU,
+        palletsTaken: takeP,
         note: note || "",
       },
       ...prev,
@@ -147,8 +148,8 @@ export default function StorageModule({
 
   const grand = sites.reduce((acc, s) => {
     const t = storageSiteTotals(s);
-    return { boxes: acc.boxes + t.boxes, units: acc.units + t.units, items: acc.items + t.items };
-  }, { boxes: 0, units: 0, items: 0 });
+    return { boxes: acc.boxes + t.boxes, pallets: acc.pallets + t.pallets, items: acc.items + t.items };
+  }, { boxes: 0, pallets: 0, items: 0 });
 
   const filteredRows = current
     ? current.rows.filter((r) => {
@@ -184,9 +185,16 @@ export default function StorageModule({
   const openTakeOut = (siteId, rowId) => {
     const r = sites.find((s) => s.id === siteId)?.rows.find((x) => x.id === rowId);
     setTakeBoxes(1);
-    setTakeUnits(0);
+    setTakePallets(0);
     setTakeNote("");
-    setModal({ kind: "takeOut", siteId, rowId, maxBoxes: Number(r?.values.boxes) || 0, maxUnits: Number(r?.values.units) || 0, item: r?.values.item });
+    setModal({
+      kind: "takeOut",
+      siteId,
+      rowId,
+      maxBoxes: Number(r?.values.boxes) || 0,
+      maxPallets: Number(r?.values.pallets ?? r?.values.units) || 0,
+      item: r?.values.item,
+    });
   };
 
   return (
@@ -194,8 +202,7 @@ export default function StorageModule({
       <header className="border-b-2 border-[#2f3b2f]/20 px-6 py-4 sticky top-0 z-20" style={{ backgroundColor: "#eee9dc" }}>
         <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">{t.storageTitle}</h1>
-            <p className="text-sm text-[#5c6b57] mt-0.5">{t.storageSubtitle}</p>
+            <h1 className="text-2xl font-bold tracking-tight">{moduleTitle || t.storageTitle}</h1>
           </div>
           <div className="relative flex-1 max-w-md" ref={globalBoxRef}>
             <Search size={15} className={`absolute top-1/2 -translate-y-1/2 text-[#5c6b57] ${lang === "ar" ? "right-3" : "left-3"}`} />
@@ -219,7 +226,7 @@ export default function StorageModule({
                       className={`w-full px-4 py-2.5 hover:bg-blue-50 border-b border-[#2f3b2f]/5 ${lang === "ar" ? "text-right" : "text-left"}`}
                     >
                       <div className="text-sm font-semibold truncate">{res.row.values.item || "—"}</div>
-                      <div className="text-xs text-[#5c6b57]">{res.siteName} · {res.row.values.boxes} {t.storageBoxes} · {res.row.values.units} {t.storageUnits}</div>
+                      <div className="text-xs text-[#5c6b57]">{res.siteName} · {res.row.values.boxes} {t.storageBoxes} · {res.row.values.pallets ?? res.row.values.units ?? 0} {t.storagePallets}</div>
                     </button>
                   ))
                 )}
@@ -236,7 +243,7 @@ export default function StorageModule({
       </header>
 
       <div className="max-w-6xl mx-auto px-6 pt-5">
-        <ModuleSwitcher active={activeModule} onChange={setActiveModule} t={t} />
+        {moduleSwitcherProps && <ModuleSwitcher {...moduleSwitcherProps} />}
 
         {loadError && (
           <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">{loadError}</div>
@@ -267,7 +274,7 @@ export default function StorageModule({
             <div className="grid md:grid-cols-3 gap-4 mb-6">
               <StatCard label={t.storageSites} value={sites.length} accent="#1f6f8b" />
               <StatCard label={t.totalBoxes} value={grand.boxes} accent="#6b4fa0" />
-              <StatCard label={t.storageUnits} value={grand.units} accent="#2e7d46" />
+              <StatCard label={t.storagePallets} value={grand.pallets} accent="#2e7d46" />
             </div>
             <Panel icon={<Warehouse size={16} className="text-[#1f6f8b]" />} title={t.storageSites}>
               <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3 p-4">
@@ -282,7 +289,7 @@ export default function StorageModule({
                         <button type="button" onClick={() => openEditSite(s.id)} className="text-[#5c6b57] hover:text-[#1f6f8b] p-1"><Pencil size={14} /></button>
                       </div>
                       <div className="text-xs text-[#5c6b57]">
-                        {tot.items} {t.storageItems} · {tot.boxes} {t.storageBoxes} · {tot.units} {t.storageUnits}
+                        {tot.items} {t.storageItems} · {tot.boxes} {t.storageBoxes} · {tot.pallets} {t.storagePallets}
                       </div>
                     </div>
                   );
@@ -300,7 +307,7 @@ export default function StorageModule({
                         <th className="px-4 py-2 text-left">{t.storageItems}</th>
                         <th className="px-4 py-2 text-left">{t.sheet}</th>
                         <th className="px-4 py-2 text-left">{t.storageBoxes}</th>
-                        <th className="px-4 py-2 text-left">{t.storageUnits}</th>
+                        <th className="px-4 py-2 text-left">{t.storagePallets}</th>
                         <th className="px-4 py-2 text-left">{t.notes}</th>
                         <th className="px-4 py-2 text-left">{t.lastUpdated}</th>
                       </tr>
@@ -311,7 +318,7 @@ export default function StorageModule({
                           <td className="px-4 py-2">{e.item || "—"}</td>
                           <td className="px-4 py-2">{e.siteName}</td>
                           <td className="px-4 py-2">{e.boxesTaken}</td>
-                          <td className="px-4 py-2">{e.unitsTaken}</td>
+                          <td className="px-4 py-2">{e.palletsTaken ?? e.unitsTaken ?? 0}</td>
                           <td className="px-4 py-2 text-[#5c6b57]">{e.note || "—"}</td>
                           <td className="px-4 py-2 text-xs text-[#5c6b57]"><Clock size={11} className="inline mr-1" />{timeAgo(e.ts, t)}</td>
                         </tr>
@@ -348,7 +355,7 @@ export default function StorageModule({
                 <div className="grid sm:grid-cols-3 gap-4 mb-5">
                   <StatCard label={t.storageItems} value={tot.items} accent="#1f6f8b" />
                   <StatCard label={t.storageBoxes} value={tot.boxes} accent="#6b4fa0" />
-                  <StatCard label={t.storageUnits} value={tot.units} accent="#2e7d46" />
+                  <StatCard label={t.storagePallets} value={tot.pallets} accent="#2e7d46" />
                 </div>
               );
             })()}
@@ -373,7 +380,7 @@ export default function StorageModule({
                       <td className="px-3 py-2 text-[#5c6b57] font-semibold">{(safePage - 1) * pageSize + i + 1}</td>
                       {COLS.map((col) => (
                         <td key={col.key} className="px-3 py-1.5">
-                          {col.type === "number" && (col.key === "boxes" || col.key === "units") ? (
+                          {col.type === "number" && (col.key === "boxes" || col.key === "pallets") ? (
                             <div className="flex items-center gap-1 justify-center">
                               <button type="button" onClick={() => bump(current.id, r.id, col.key, -1)} className="w-6 h-6 flex items-center justify-center rounded bg-red-50 text-red-600 border border-red-200"><Minus size={12} /></button>
                               <SheetCellInput type="number" value={r.values[col.key] ?? 0} onCommit={(v) => changeCell(current.id, r.id, col.key, v)} className="w-16 text-center border border-[#2f3b2f]/15 rounded px-1 py-1 font-bold" />
@@ -439,13 +446,13 @@ export default function StorageModule({
               <input type="number" min={0} max={modal.maxBoxes} value={takeBoxes} onChange={(e) => setTakeBoxes(Number(e.target.value))} className="w-full px-3 py-2 rounded border text-sm" />
             </div>
             <div>
-              <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.storageUnits} (max {modal.maxUnits})</label>
-              <input type="number" min={0} max={modal.maxUnits} value={takeUnits} onChange={(e) => setTakeUnits(Number(e.target.value))} className="w-full px-3 py-2 rounded border text-sm" />
+              <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.storagePallets} (max {modal.maxPallets})</label>
+              <input type="number" min={0} max={modal.maxPallets} value={takePallets} onChange={(e) => setTakePallets(Number(e.target.value))} className="w-full px-3 py-2 rounded border text-sm" />
             </div>
           </div>
           <label className="text-xs font-semibold text-[#5c6b57] mb-1 block">{t.optionalNote}</label>
           <input value={takeNote} onChange={(e) => setTakeNote(e.target.value)} className="w-full px-3 py-2 rounded border text-sm mb-4" />
-          <button type="button" onClick={() => { takeOut(modal.siteId, modal.rowId, takeBoxes, takeUnits, takeNote); setModal(null); }} className="w-full py-2 rounded text-white text-sm font-semibold" style={{ backgroundColor: "#6b4fa0" }}>
+          <button type="button" onClick={() => { takeOut(modal.siteId, modal.rowId, takeBoxes, takePallets, takeNote); setModal(null); }} className="w-full py-2 rounded text-white text-sm font-semibold" style={{ backgroundColor: "#6b4fa0" }}>
             {t.storageConfirmTakeOut}
           </button>
         </ModalWrap>
